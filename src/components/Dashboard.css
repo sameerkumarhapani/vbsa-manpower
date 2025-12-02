@@ -1,0 +1,13 @@
+.dashboard {
+  display: flex;
+  height: 100vh;
+  background: #f9fafb;
+}
+
+.dashboard-main {
+  flex: 1;
+  overflow-y: auto;
+}
+.dashboard-stat .icon {
+  color: var(--color-primary);
+}
