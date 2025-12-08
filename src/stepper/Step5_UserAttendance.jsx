@@ -200,6 +200,11 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
   // Emergency Onboarding state
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyForm, setEmergencyForm] = useState({ name: '', mobile: '', aadhar: '', role: '', partnerId: '' });
+
+  // Venue Checklist state
+  const [showChecklistModal, setShowChecklistModal] = useState(false);
+  const [checklistSessionId, setChecklistSessionId] = useState(null);
+  const [checklistForm, setChecklistForm] = useState({});
   const [emergencyFaceImage, setEmergencyFaceImage] = useState('');
   const [emergencyShowCamera, setEmergencyShowCamera] = useState(false);
   const emergencyVideoRef = useRef(null);
@@ -585,6 +590,141 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
     alert(`Emergency user "${newUser.name}" onboarded successfully. This registration is valid for 24 hours.`);
   };
 
+  // Open Venue Checklist Modal with prefilled data
+  const openChecklistModal = (session) => {
+    const sessionRecords = recordsBySession[session.id] || [];
+    const presentRecords = sessionRecords.filter(r => r.present);
+
+    // Count users by role
+    const countByRole = (role) => presentRecords.filter(r => (r.userRole || '').toLowerCase().includes(role.toLowerCase())).length;
+    const getUsersByRole = (role) => presentRecords.filter(r => (r.userRole || '').toLowerCase().includes(role.toLowerCase()));
+
+    // Get session date and time
+    let sessionDate = '';
+    let sessionTime = '';
+    try {
+      const startDt = session.startISO ? new Date(session.startISO) : null;
+      const endDt = session.endISO ? new Date(session.endISO) : null;
+      if (startDt && !isNaN(startDt.getTime())) {
+        sessionDate = startDt.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        sessionTime = `${startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} to ${endDt ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}`;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Get venue info from first record or formData
+    const venueName = presentRecords[0]?.venueName || formData.venueName || 'Mumbai University Exam Centre';
+    const venueState = formData.venueState || 'Maharashtra';
+    const venueCity = formData.venueCity || 'Mumbai';
+    const venueCode = formData.venueCode || 'MUM-001';
+
+    // Security guards count
+    const securityGuards = getUsersByRole('security');
+    const maleGuards = Math.ceil(securityGuards.length / 2); // Dummy split
+    const femaleGuards = securityGuards.length - maleGuards;
+
+    // Other role counts
+    const invigilators = getUsersByRole('invigilator');
+    const serverManagers = getUsersByRole('server manager');
+    const cctvTechnicians = getUsersByRole('cctv');
+    const biometricOperators = getUsersByRole('biometric');
+    const bodyCamOperators = getUsersByRole('body cam');
+
+    // Count body cams issued (devices of type Body Cam)
+    const bodyCamsIssued = presentRecords.filter(r => (r.deviceType || '').toLowerCase().includes('body cam')).length;
+
+    setChecklistForm({
+      // Centre Manager Info (prefilled from logged-in user)
+      centreManagerName: user?.fullName || 'Rajesh Kumar',
+      centreManagerEmail: user?.email || 'rajesh.kumar@exam.gov.in',
+      centreManagerMobile: user?.mobile || user?.phone || '9876543210',
+
+      // Examination Info
+      examDate: sessionDate || '03/12/2025',
+      examBatch: sessionTime || '09:00 AM to 12:00 PM',
+
+      // Venue Info
+      venueState: venueState,
+      venueCity: venueCity,
+      venueName: venueName,
+      venueCode: venueCode,
+
+      // Security Guards (prefilled)
+      maleGuardsPresent: maleGuards || 2,
+      femaleGuardsPresent: femaleGuards || 2,
+      totalFriskingGuards: securityGuards.length || 4,
+
+      // Editable fields
+      hhmdDevices: '',
+      femaleCanopy: '',
+      computerPartitions: '',
+      signagesDisplayed: '',
+      seatingPlanDisplayed: '',
+      invigilatorsPresent: '',
+
+      // Invigilators (prefilled)
+      invigilatorsCount: invigilators.length || 3,
+
+      // Server Managers (prefilled)
+      serverManagersCount: serverManagers.length || 2,
+      serverManagersList: serverManagers.length > 0 ? serverManagers : [
+        { name: 'Amit Sharma', mobile: '9876543211' },
+        { name: 'Priya Singh', mobile: '9876543212' }
+      ],
+
+      // DG Set & Observer
+      dgSetAvailable: '',
+      venueObserverPresent: '',
+
+      // CCTV Technicians (prefilled)
+      cctvTechniciansList: cctvTechnicians.length > 0 ? cctvTechnicians : [
+        { name: 'Ravi Verma', mobile: '9876543213' }
+      ],
+
+      // Biometric Operators (prefilled)
+      biometricOperatorsCount: biometricOperators.length || 2,
+      biometricOperatorsList: biometricOperators.length > 0 ? biometricOperators : [
+        { name: 'Sunita Patel', mobile: '9876543214' },
+        { name: 'Mohan Das', mobile: '9876543215' }
+      ],
+
+      // Body Cam Operators (prefilled)
+      bodyCamOperatorsList: bodyCamOperators.length > 0 ? bodyCamOperators : [
+        { name: 'Kiran Rao', mobile: '9876543216' }
+      ],
+      bodyCamsIssued: bodyCamsIssued || bodyCamOperators.length || 1,
+    });
+
+    setChecklistSessionId(session.id);
+    setShowChecklistModal(true);
+  };
+
+  const handleChecklistSubmit = () => {
+    // Validate required editable fields
+    if (!checklistForm.hhmdDevices) { alert('Please enter number of HHMD devices'); return; }
+    if (!checklistForm.femaleCanopy) { alert('Please select if female frisking canopy is available'); return; }
+    if (!checklistForm.computerPartitions) { alert('Please select if computer partitions are present'); return; }
+    if (!checklistForm.signagesDisplayed) { alert('Please select if signages are displayed'); return; }
+    if (!checklistForm.seatingPlanDisplayed) { alert('Please select if seating plan is displayed'); return; }
+    if (!checklistForm.invigilatorsPresent) { alert('Please select if invigilators are present'); return; }
+    if (!checklistForm.dgSetAvailable) { alert('Please select if DG Set is available'); return; }
+    if (!checklistForm.venueObserverPresent) { alert('Please select if venue observer is present'); return; }
+
+    // Save checklist to formData
+    const checklistData = {
+      sessionId: checklistSessionId,
+      submittedAt: new Date().toISOString(),
+      submittedBy: user?.fullName || 'Unknown',
+      ...checklistForm
+    };
+
+    const existingChecklists = formData.venueChecklists || [];
+    const updatedChecklists = [...existingChecklists.filter(c => c.sessionId !== checklistSessionId), checklistData];
+    setFormData({ ...formData, venueChecklists: updatedChecklists });
+
+    setShowChecklistModal(false);
+    alert('Venue Checklist submitted successfully!');
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -729,9 +869,17 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                   })()}
                 </div>
 
-                {allocated.length > 0 && (
-                  <button onClick={(e) => { e.stopPropagation(); const list = allocated; setDeallocateList(list); setDeallocateSessionId(s.id); setSelectedDeallocateIds(new Set(list.map(d => d.userId))); setShowDeallocateModal(true); }} style={{ padding: '6px 10px', borderRadius: 8, background: 'white', border: '1px solid #e5e7eb', cursor: 'pointer' }}>Deallocate Device</button>
-                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); openChecklistModal(s); }} 
+                    style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                  >
+                    Submit Venue Checklist
+                  </button>
+                  {allocated.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); const list = allocated; setDeallocateList(list); setDeallocateSessionId(s.id); setSelectedDeallocateIds(new Set(list.map(d => d.userId))); setShowDeallocateModal(true); }} style={{ padding: '6px 10px', borderRadius: 8, background: 'white', border: '1px solid #e5e7eb', cursor: 'pointer' }}>Deallocate Device</button>
+                  )}
+                </div>
               </summary>
 
               <div style={{ overflowX: 'auto' }}>
@@ -1073,6 +1221,362 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
               <button onClick={() => setShowEmergencyModal(false)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer' }}>Cancel</button>
               <button onClick={handleEmergencySubmit} style={{ padding: '8px 16px', borderRadius: 8, background: '#dc2626', color: 'white', border: 'none', fontWeight: 600, cursor: 'pointer' }}>Register Emergency User</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Venue Checklist Modal */}
+      {showChecklistModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400 }} onClick={() => setShowChecklistModal(false)}>
+          <div style={{ width: 900, maxWidth: '95%', maxHeight: '90vh', background: 'white', borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', borderRadius: '12px 12px 0 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 22 }}>📋</span>
+                <span style={{ fontWeight: 700, fontSize: 18, color: 'white' }}>Venue Checklist</span>
+              </div>
+              <button onClick={() => setShowChecklistModal(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', fontSize: 20, color: 'white', cursor: 'pointer', borderRadius: 6, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+              {/* Centre Manager Information */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Centre Manager Information</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Name of Centre Manager</label>
+                    <input value={checklistForm.centreManagerName || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Email ID</label>
+                    <input value={checklistForm.centreManagerEmail || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Mobile Number</label>
+                    <input value={checklistForm.centreManagerMobile || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Examination Details */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Examination Details</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Date of Examination</label>
+                    <input value={checklistForm.examDate || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Batch of Examination</label>
+                    <input value={checklistForm.examBatch || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Venue Information */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Venue Information</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>State</label>
+                    <input value={checklistForm.venueState || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>City</label>
+                    <input value={checklistForm.venueCity || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Venue Name & Code</label>
+                    <input value={`${checklistForm.venueName || ''} (${checklistForm.venueCode || ''})`} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Security & Frisking */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Security & Frisking</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Male Frisking Guards Present</label>
+                    <input value={checklistForm.maleGuardsPresent || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Female Frisking Guards Present</label>
+                    <input value={checklistForm.femaleGuardsPresent || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Total No. of Frisking Guards</label>
+                    <input value={checklistForm.totalFriskingGuards || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>No. of HHMD Devices <span style={{ color: '#dc2626' }}>*</span></label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={checklistForm.hhmdDevices || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, hhmdDevices: e.target.value })}
+                      placeholder="Enter number"
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }} 
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Closed canopy for female frisking? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.femaleCanopy || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, femaleCanopy: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Infrastructure */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Infrastructure</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Computer systems have partitions? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.computerPartitions || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, computerPartitions: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Signages/Direction Boards displayed? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.signagesDisplayed || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, signagesDisplayed: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Seating Plan displayed outside lab? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.seatingPlanDisplayed || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, seatingPlanDisplayed: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>DG Set available at venue? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.dgSetAvailable || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, dgSetAvailable: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Venue Observer (from CET) present? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.venueObserverPresent || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, venueObserverPresent: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Invigilators */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Invigilators</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Invigilators present in lab? <span style={{ color: '#dc2626' }}>*</span></label>
+                    <select 
+                      value={checklistForm.invigilatorsPresent || ''} 
+                      onChange={(e) => setChecklistForm({ ...checklistForm, invigilatorsPresent: e.target.value })}
+                      style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>No. of Invigilators Present</label>
+                    <input value={checklistForm.invigilatorsCount || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Server Managers */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Server Managers</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>No. of Server Managers at Venue</label>
+                    <input value={checklistForm.serverManagersCount || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Name & Mobile No. of Server Manager(s)</label>
+                  <div style={{ background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#e5e7eb' }}>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Sr.</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Name</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Mobile No.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(checklistForm.serverManagersList || []).map((sm, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                            <td style={{ padding: 8 }}>{idx + 1}</td>
+                            <td style={{ padding: 8 }}>{sm.userName || sm.name}</td>
+                            <td style={{ padding: 8 }}>{sm.userMobile || sm.mobile || '-'}</td>
+                          </tr>
+                        ))}
+                        {(checklistForm.serverManagersList || []).length === 0 && (
+                          <tr><td colSpan={3} style={{ padding: 8, color: '#6b7280' }}>No server managers present</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* CCTV Technicians */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>CCTV Technicians</h4>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Name & Mobile No. of CCTV Technician(s)</label>
+                  <div style={{ background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#e5e7eb' }}>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Sr.</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Name</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Mobile No.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(checklistForm.cctvTechniciansList || []).map((ct, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                            <td style={{ padding: 8 }}>{idx + 1}</td>
+                            <td style={{ padding: 8 }}>{ct.userName || ct.name}</td>
+                            <td style={{ padding: 8 }}>{ct.userMobile || ct.mobile || '-'}</td>
+                          </tr>
+                        ))}
+                        {(checklistForm.cctvTechniciansList || []).length === 0 && (
+                          <tr><td colSpan={3} style={{ padding: 8, color: '#6b7280' }}>No CCTV technicians present</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Biometric Operators */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Biometric Operators</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>No. of Biometric Operators at Venue</label>
+                    <input value={checklistForm.biometricOperatorsCount || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Name & Mobile No. of Biometric Operator(s)</label>
+                  <div style={{ background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#e5e7eb' }}>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Sr.</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Name</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Mobile No.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(checklistForm.biometricOperatorsList || []).map((bo, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                            <td style={{ padding: 8 }}>{idx + 1}</td>
+                            <td style={{ padding: 8 }}>{bo.userName || bo.name}</td>
+                            <td style={{ padding: 8 }}>{bo.userMobile || bo.mobile || '-'}</td>
+                          </tr>
+                        ))}
+                        {(checklistForm.biometricOperatorsList || []).length === 0 && (
+                          <tr><td colSpan={3} style={{ padding: 8, color: '#6b7280' }}>No biometric operators present</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body Cam Operators */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Body Cam Operators</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>No. of Body Cams Issued</label>
+                    <input value={checklistForm.bodyCamsIssued || 0} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Name & Mobile No. of Body Cam Operator(s)</label>
+                  <div style={{ background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#e5e7eb' }}>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Sr.</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Name</th>
+                          <th style={{ padding: 8, textAlign: 'left', fontWeight: 600 }}>Mobile No.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(checklistForm.bodyCamOperatorsList || []).map((bc, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                            <td style={{ padding: 8 }}>{idx + 1}</td>
+                            <td style={{ padding: 8 }}>{bc.userName || bc.name}</td>
+                            <td style={{ padding: 8 }}>{bc.userMobile || bc.mobile || '-'}</td>
+                          </tr>
+                        ))}
+                        {(checklistForm.bodyCamOperatorsList || []).length === 0 && (
+                          <tr><td colSpan={3} style={{ padding: 8, color: '#6b7280' }}>No body cam operators present</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: 12, background: '#f9fafb', borderRadius: '0 0 12px 12px' }}>
+              <button onClick={() => setShowChecklistModal(false)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Cancel</button>
+              <button onClick={handleChecklistSubmit} style={{ padding: '10px 20px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Submit Checklist</button>
             </div>
           </div>
         </div>

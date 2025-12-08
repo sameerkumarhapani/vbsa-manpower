@@ -1,10 +1,10 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { Edit2, Plus, Filter, X, Camera, Check, AlertCircle, Send } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { Edit2, Plus, Filter, X, Camera, Check, AlertCircle, Send, Upload, Download } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfig } from '../../contexts/ConfigContext';
 
 const UsersView = () => {
-  const { getVisibleUsers, user, users, syncUserStatusesWithVendors } = useAuth();
+  const { getVisibleUsers, user, users, syncUserStatusesWithVendors, addUsers, vendors } = useAuth();
   const allUsers = useMemo(() => getVisibleUsers(), [getVisibleUsers, users]);
   
   // Sync user statuses with vendor statuses on mount
@@ -30,6 +30,13 @@ const UsersView = () => {
   const [cameraActive, setCameraActive] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
+  
+  // Bulk upload state
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkUploadFile, setBulkUploadFile] = useState(null);
+  const [bulkUploadError, setBulkUploadError] = useState('');
+  const [bulkUploadSuccess, setBulkUploadSuccess] = useState('');
+  const fileInputRef = useRef(null);
   
   const [formData, setFormData] = useState({
     fullName: '',
@@ -269,6 +276,148 @@ const UsersView = () => {
     setValidationErrors({ ...validationErrors, [field]: error });
   };
 
+  // Get vendor names for dropdown
+  const vendorNames = useMemo(() => {
+    return vendors.filter(v => v.status === 'Active').map(v => v.name || v.vendorName);
+  }, [vendors]);
+
+  // Download CSV template for bulk upload
+  const downloadTemplate = () => {
+    const headers = [
+      'Full Name',
+      'Email',
+      'Mobile No',
+      'Address',
+      'City',
+      'State',
+      'Pin Code',
+      'Aadhar No',
+      'Role',
+      'Partner Organization',
+      'Status (Active/Inactive)'
+    ];
+    
+    const sampleRow = [
+      'John Doe',
+      'john.doe@example.com',
+      '9876543210',
+      '123 Main Street, Near Park',
+      'Mumbai',
+      'Maharashtra',
+      '400001',
+      '123456789012',
+      'CCTV Technician',
+      vendorNames[0] || 'Partner Organization Name',
+      'Active'
+    ];
+    
+    const csvContent = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'user_bulk_upload_template.csv';
+    link.click();
+  };
+
+  // Handle bulk upload file selection
+  const handleBulkFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.name.endsWith('.csv') && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        setBulkUploadError('Please upload a CSV or Excel file');
+        setBulkUploadFile(null);
+        return;
+      }
+      setBulkUploadFile(file);
+      setBulkUploadError('');
+    }
+  };
+
+  // Process bulk upload
+  const handleBulkUpload = () => {
+    if (!bulkUploadFile) {
+      setBulkUploadError('Please select a file to upload');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          setBulkUploadError('File must contain header row and at least one data row');
+          return;
+        }
+
+        const newUsers = [];
+        const errors = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          // Handle CSV parsing with potential commas in quoted fields
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          
+          if (values.length < 10) {
+            errors.push(`Row ${i + 1}: Incomplete data (expected at least 10 columns)`);
+            continue;
+          }
+
+          const userData = {
+            id: `user-bulk-${Date.now()}-${i}`,
+            fullName: values[0],
+            email: values[1],
+            mobile: values[2],
+            address: values[3],
+            city: values[4],
+            state: values[5],
+            pinCode: values[6],
+            aadharNo: values[7],
+            role: values[8],
+            vendorName: values[9],
+            status: values[10] || 'Active',
+            mobileVerified: false,
+            faceRegistered: false,
+          };
+
+          // Basic validation
+          if (!userData.fullName) {
+            errors.push(`Row ${i + 1}: Full name is required`);
+            continue;
+          }
+          if (!userData.mobile || userData.mobile.length !== 10) {
+            errors.push(`Row ${i + 1}: Valid 10-digit mobile number is required`);
+            continue;
+          }
+          if (!userData.role) {
+            errors.push(`Row ${i + 1}: Role is required`);
+            continue;
+          }
+
+          newUsers.push(userData);
+        }
+
+        if (newUsers.length > 0) {
+          addUsers(newUsers);
+          setBulkUploadSuccess(`Successfully uploaded ${newUsers.length} user(s)${errors.length > 0 ? `. ${errors.length} row(s) had errors.` : ''}`);
+          setBulkUploadFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        } else {
+          setBulkUploadError('No valid data found in the file');
+        }
+
+        if (errors.length > 0 && newUsers.length === 0) {
+          setBulkUploadError(errors.slice(0, 3).join('; ') + (errors.length > 3 ? `... and ${errors.length - 3} more errors` : ''));
+        } else if (errors.length > 0) {
+          setBulkUploadError(errors.slice(0, 3).join('; ') + (errors.length > 3 ? `... and ${errors.length - 3} more errors` : ''));
+        }
+      } catch (err) {
+        setBulkUploadError('Error parsing file: ' + err.message);
+      }
+    };
+    reader.readAsText(bulkUploadFile);
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -353,6 +502,25 @@ const UsersView = () => {
                   {(filterRole ? 1 : 0) + (filterVendor ? 1 : 0) + (filterStatus ? 1 : 0) + (filterMobileVerified ? 1 : 0) + (filterFaceRegistered ? 1 : 0)}
                 </span>
               )}
+            </button>
+            <button 
+              onClick={() => { setShowBulkUploadModal(true); setBulkUploadError(''); setBulkUploadSuccess(''); setBulkUploadFile(null); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 16px',
+                border: '1px solid #e5e7eb',
+                background: 'white',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#374151',
+              }}
+            >
+              <Upload size={16} />
+              Bulk Upload
             </button>
             <button 
               onClick={() => setShowUserModal(true)}
@@ -2013,6 +2181,153 @@ const UsersView = () => {
                 }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Upload Modal */}
+      {showBulkUploadModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowBulkUploadModal(false)}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '24px',
+              width: '500px',
+              maxWidth: '90%',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Bulk Upload Users</h2>
+              <button
+                onClick={() => setShowBulkUploadModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                <X size={20} color="#6b7280" />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                Upload a CSV file with user data. Download the template to see the required format.
+              </p>
+              
+              <button
+                onClick={downloadTemplate}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  border: '1px solid var(--color-primary)',
+                  background: 'white',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-primary)',
+                  marginBottom: '20px',
+                }}
+              >
+                <Download size={16} />
+                Download Template
+              </button>
+
+              <div
+                style={{
+                  border: '2px dashed #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '30px',
+                  textAlign: 'center',
+                  background: '#f9fafb',
+                  cursor: 'pointer',
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload size={40} color="#9ca3af" style={{ marginBottom: '12px' }} />
+                <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 8px 0' }}>
+                  {bulkUploadFile ? bulkUploadFile.name : 'Click to select file or drag and drop'}
+                </p>
+                <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                  Supported formats: CSV
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  onChange={handleBulkFileChange}
+                  style={{ display: 'none' }}
+                />
+              </div>
+
+              {bulkUploadError && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#fef2f2', borderRadius: '6px', color: '#dc2626', fontSize: '13px' }}>
+                  {bulkUploadError}
+                </div>
+              )}
+
+              {bulkUploadSuccess && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#f0fdf4', borderRadius: '6px', color: '#059669', fontSize: '13px' }}>
+                  {bulkUploadSuccess}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                onClick={() => setShowBulkUploadModal(false)}
+                style={{
+                  padding: '10px 20px',
+                  border: '1px solid #e5e7eb',
+                  background: 'white',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkUpload}
+                disabled={!bulkUploadFile}
+                style={{
+                  padding: '10px 20px',
+                  background: bulkUploadFile ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-2) 100%)' : '#e5e7eb',
+                  color: bulkUploadFile ? 'white' : '#9ca3af',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: bulkUploadFile ? 'pointer' : 'not-allowed',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                }}
+              >
+                Upload & Import
               </button>
             </div>
           </div>

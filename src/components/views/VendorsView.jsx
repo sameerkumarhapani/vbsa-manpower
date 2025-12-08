@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Edit2, Plus, Building, X, Filter } from 'lucide-react';
+import React, { useMemo, useState, useRef } from 'react';
+import { Edit2, Plus, Building, X, Filter, Upload, Download } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
 const VendorsView = () => {
@@ -7,7 +7,7 @@ const VendorsView = () => {
   const mockVendors = useMemo(() => getVisibleVendors(), [getVisibleVendors, contextVendors]);
   const existingMobileNumbers = useMemo(() => getAllExistingMobileNumbers(), [getAllExistingMobileNumbers]);
   
-  // All available user roles that can be created by vendors
+  // All available user roles that can be created by partners
   const allUserRoles = [
     'CCTV Technician',
     'Biometric Operator',
@@ -22,7 +22,7 @@ const VendorsView = () => {
     'Security Guards',
   ];
 
-  const vendorTypes = [
+  const partnerTypes = [
     'CCTV Partner',
     'Biometric Partner',
     'Body Cam Partner',
@@ -37,6 +37,11 @@ const VendorsView = () => {
   const [vendors, setVendors] = useState(mockVendors);
   const [showForm, setShowForm] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkUploadFile, setBulkUploadFile] = useState(null);
+  const [bulkUploadError, setBulkUploadError] = useState('');
+  const [bulkUploadSuccess, setBulkUploadSuccess] = useState('');
+  const fileInputRef = useRef(null);
   const [editingVendor, setEditingVendor] = useState(null);
   const [filterVendorType, setFilterVendorType] = useState([]);
   const [filterStatus, setFilterStatus] = useState('');
@@ -63,7 +68,7 @@ const VendorsView = () => {
   const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 
-  // Filter vendors based on selected filters (support multiple vendor types)
+  // Filter partners based on selected filters (support multiple partner types)
   const filteredVendors = useMemo(() => {
     return vendors.filter((vendor) => {
       const vendorTypesForVendor = vendor.vendorTypes || (vendor.vendorType ? [vendor.vendorType] : []);
@@ -101,7 +106,7 @@ const VendorsView = () => {
     if (!formData.state.trim()) newErrors.state = 'State is required';
     if (!formData.pincode.trim()) newErrors.pincode = 'Pincode is required';
     if (formData.allowedUserRoles.length === 0) newErrors.allowedUserRoles = 'Please select at least one user role';
-    if (!formData.vendorTypes || formData.vendorTypes.length === 0) newErrors.vendorTypes = 'Please select at least one vendor type';
+    if (!formData.vendorTypes || formData.vendorTypes.length === 0) newErrors.vendorTypes = 'Please select at least one partner type';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -214,9 +219,9 @@ const VendorsView = () => {
         // Deactivate all users associated with this vendor if vendor is being deactivated
         if (isBeingDeactivated) {
           deactivateUsersByVendor(editingVendor.vendorName);
-          alert('Vendor deactivated successfully! All associated users have also been deactivated.');
+          alert('Partner deactivated successfully! All associated users have also been deactivated.');
         } else {
-          alert('Vendor updated successfully!');
+          alert('Partner updated successfully!');
         }
       } else {
         // Add new vendor
@@ -242,7 +247,7 @@ const VendorsView = () => {
         // Add vendor to AuthContext (persists to localStorage)
         addVendor(newVendor);
         
-        alert('Vendor added successfully!');
+        alert('Partner added successfully!');
       }
       setShowForm(false);
       resetForm();
@@ -342,18 +347,152 @@ const VendorsView = () => {
       : { bg: '#fee2e2', color: '#dc2626' };
   };
 
+  // Download Excel template for bulk upload
+  const downloadTemplate = () => {
+    const headers = [
+      'Organization Name',
+      'Partner Types (comma separated)',
+      'Contact Person Name',
+      'Contact Person Mobile',
+      'Email',
+      'GST Number',
+      'PAN Number',
+      'Billing Address',
+      'City',
+      'State',
+      'Pincode',
+      'Status (Active/Inactive)',
+      'Allowed User Roles (comma separated)'
+    ];
+    
+    const sampleRow = [
+      'ABC Technologies Pvt Ltd',
+      'CCTV Partner, Technology Partner',
+      'John Doe',
+      '9876543210',
+      'john@abc.com',
+      '27AABCU9603R1ZM',
+      'AABCU9603R',
+      '123 Business Park, Sector 5',
+      'Mumbai',
+      'Maharashtra',
+      '400001',
+      'Active',
+      'CCTV Technician, Network Administrator'
+    ];
+    
+    const csvContent = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'partner_bulk_upload_template.csv';
+    link.click();
+  };
+
+  // Handle bulk upload file selection
+  const handleBulkFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.name.endsWith('.csv') && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        setBulkUploadError('Please upload a CSV or Excel file');
+        setBulkUploadFile(null);
+        return;
+      }
+      setBulkUploadFile(file);
+      setBulkUploadError('');
+    }
+  };
+
+  // Process bulk upload
+  const handleBulkUpload = () => {
+    if (!bulkUploadFile) {
+      setBulkUploadError('Please select a file to upload');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          setBulkUploadError('File must contain header row and at least one data row');
+          return;
+        }
+
+        const headers = lines[0].split(',').map(h => h.trim());
+        const newPartners = [];
+        const errors = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim());
+          if (values.length < 12) {
+            errors.push(`Row ${i + 1}: Incomplete data`);
+            continue;
+          }
+
+          const partnerData = {
+            id: `V-${Date.now()}-${i}`,
+            vendorName: values[0],
+            name: values[0],
+            vendorTypes: values[1].split(',').map(t => t.trim()).filter(Boolean),
+            vendorType: values[1].split(',')[0]?.trim() || '',
+            contactPerson: values[2],
+            phone: `+91-${values[3]}`,
+            email: values[4],
+            gst: values[5],
+            pan: values[6],
+            address: values[7],
+            city: values[8],
+            state: values[9],
+            pincode: values[10],
+            status: values[11] || 'Active',
+            allowedUserRoles: values[12] ? values[12].split(',').map(r => r.trim()).filter(Boolean) : [],
+          };
+
+          // Basic validation
+          if (!partnerData.vendorName) {
+            errors.push(`Row ${i + 1}: Organization name is required`);
+            continue;
+          }
+
+          newPartners.push(partnerData);
+        }
+
+        if (newPartners.length > 0) {
+          const updatedVendors = [...vendors, ...newPartners];
+          setVendors(updatedVendors);
+          newPartners.forEach(p => addVendor(p));
+          setBulkUploadSuccess(`Successfully uploaded ${newPartners.length} partner(s)${errors.length > 0 ? `. ${errors.length} row(s) had errors.` : ''}`);
+          setBulkUploadFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        } else {
+          setBulkUploadError('No valid data found in the file');
+        }
+
+        if (errors.length > 0) {
+          setBulkUploadError(errors.slice(0, 3).join('; ') + (errors.length > 3 ? `... and ${errors.length - 3} more errors` : ''));
+        }
+      } catch (err) {
+        setBulkUploadError('Error parsing file: ' + err.message);
+      }
+    };
+    reader.readAsText(bulkUploadFile);
+  };
+
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Vendors Management</h1>
-        <p className="page-subtitle">Manage all service vendors and partners</p>
+        <h1 className="page-title">Partners Management</h1>
+        <p className="page-subtitle">Manage all service partners</p>
       </div>
 
       <div className="content-section">
         <div className="section-header">
           <h2 className="section-title">
             <Building size={20} style={{ marginRight: '8px', display: 'inline' }} />
-            All Vendors ({filteredVendors.length})
+            All Partners ({filteredVendors.length})
           </h2>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <button 
@@ -401,9 +540,29 @@ const VendorsView = () => {
                 </span>
               )}
             </button>
+            <button 
+              className="btn-secondary"
+              onClick={() => { setShowBulkUploadModal(true); setBulkUploadError(''); setBulkUploadSuccess(''); setBulkUploadFile(null); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 16px',
+                border: '1px solid #e5e7eb',
+                background: 'white',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#374151',
+              }}
+            >
+              <Upload size={16} />
+              Bulk Upload
+            </button>
             <button className="btn-primary" onClick={handleAddNew}>
               <Plus size={16} style={{ marginRight: '8px' }} />
-              Add Vendor
+              Add Partner
             </button>
           </div>
         </div>
@@ -418,14 +577,14 @@ const VendorsView = () => {
               border: '1px solid #e5e7eb',
             }}
           >
-            <p style={{ color: '#6b7280', fontSize: '14px' }}>No vendors found</p>
+            <p style={{ color: '#6b7280', fontSize: '14px' }}>No partners found</p>
           </div>
         ) : (
           <table className="table">
             <thead>
               <tr>
-                <th>Vendor Organization Name</th>
-                <th>Vendor Type(s)</th>
+                <th>Partner Organization Name</th>
+                <th>Partner Type(s)</th>
                 <th>Contact Person</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -534,7 +693,7 @@ const VendorsView = () => {
             >
               <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Filter size={20} />
-                Filter Vendors
+                Filter Partners
               </h2>
               <button
                 onClick={() => setShowFilterModal(false)}
@@ -554,7 +713,7 @@ const VendorsView = () => {
             <div style={{ padding: '24px' }}>
               {/* Vendor Type Filter */}
               <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '10px', color: '#1f2937' }}>Vendor Type</label>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '10px', color: '#1f2937' }}>Partner Type</label>
                 <select
                   value={filterVendorType && filterVendorType.length > 0 ? filterVendorType[0] : ''}
                   onChange={(e) => setFilterVendorType(e.target.value ? [e.target.value] : [])}
@@ -572,7 +731,7 @@ const VendorsView = () => {
                   }}
                 >
                   <option value="">All</option>
-                  {vendorTypes.map((type) => (
+                  {partnerTypes.map((type) => (
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
@@ -813,7 +972,7 @@ const VendorsView = () => {
               }}
             >
               <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>
-                {editingVendor ? 'Edit Vendor' : 'Onboard New Vendor'}
+                {editingVendor ? 'Edit Partner' : 'Onboard New Partner'}
               </h2>
               <button
                 onClick={handleCloseForm}
@@ -856,9 +1015,9 @@ const VendorsView = () => {
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>Vendor Type(s) *</label>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>Partner Type(s) *</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', padding: '10px', border: errors.vendorTypes ? '1px solid #dc2626' : '1px solid #e5e7eb', borderRadius: '6px', height: '150px', overflowY: 'scroll', background: '#fff' }}>
-                      {vendorTypes.map((type) => {
+                      {partnerTypes.map((type) => {
                         const checked = formData.vendorTypes.includes(type);
                         return (
                           <label
@@ -1133,7 +1292,7 @@ const VendorsView = () => {
               {/* Allowed User Roles Section */}
               <div style={{ marginBottom: '30px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1f2937', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Allowed User Roles *</h3>
-                <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>Select which user roles this vendor can create</p>
+                <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>Select which user roles this partner can create</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
                   {allUserRoles.map((role) => (
                     <label
@@ -1236,10 +1395,157 @@ const VendorsView = () => {
                     e.target.style.boxShadow = 'none';
                   }}
                 >
-                  {editingVendor ? 'Update Vendor' : 'Add Vendor'}
+                  {editingVendor ? 'Update Partner' : 'Add Partner'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Upload Modal */}
+      {showBulkUploadModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowBulkUploadModal(false)}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '24px',
+              width: '500px',
+              maxWidth: '90%',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Bulk Upload Partners</h2>
+              <button
+                onClick={() => setShowBulkUploadModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                <X size={20} color="#6b7280" />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                Upload a CSV or Excel file with partner data. Download the template to see the required format.
+              </p>
+              
+              <button
+                onClick={downloadTemplate}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  border: '1px solid var(--color-primary)',
+                  background: 'white',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-primary)',
+                  marginBottom: '20px',
+                }}
+              >
+                <Download size={16} />
+                Download Template
+              </button>
+
+              <div
+                style={{
+                  border: '2px dashed #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '30px',
+                  textAlign: 'center',
+                  background: '#f9fafb',
+                  cursor: 'pointer',
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload size={40} color="#9ca3af" style={{ marginBottom: '12px' }} />
+                <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 8px 0' }}>
+                  {bulkUploadFile ? bulkUploadFile.name : 'Click to select file or drag and drop'}
+                </p>
+                <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                  Supported formats: CSV, XLS, XLSX
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.xls,.xlsx"
+                  onChange={handleBulkFileChange}
+                  style={{ display: 'none' }}
+                />
+              </div>
+
+              {bulkUploadError && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#fef2f2', borderRadius: '6px', color: '#dc2626', fontSize: '13px' }}>
+                  {bulkUploadError}
+                </div>
+              )}
+
+              {bulkUploadSuccess && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#f0fdf4', borderRadius: '6px', color: '#059669', fontSize: '13px' }}>
+                  {bulkUploadSuccess}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                onClick={() => setShowBulkUploadModal(false)}
+                style={{
+                  padding: '10px 20px',
+                  border: '1px solid #e5e7eb',
+                  background: 'white',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkUpload}
+                disabled={!bulkUploadFile}
+                style={{
+                  padding: '10px 20px',
+                  background: bulkUploadFile ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-2) 100%)' : '#e5e7eb',
+                  color: bulkUploadFile ? 'white' : '#9ca3af',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: bulkUploadFile ? 'pointer' : 'not-allowed',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                }}
+              >
+                Upload & Import
+              </button>
+            </div>
           </div>
         </div>
       )}

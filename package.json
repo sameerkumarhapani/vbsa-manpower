@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://sameerkumar.hapani.github.io/vbsa-manpower",
+  "homepage": "https://sameerkumarhapani.github.io/vbsa-manpower",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

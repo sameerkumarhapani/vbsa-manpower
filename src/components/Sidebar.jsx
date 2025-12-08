@@ -8,7 +8,7 @@ const Sidebar = ({ activeMenu, setActiveMenu }) => {
 
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Layout, roles: null },
-    { id: 'vendors', label: 'Vendors', icon: Store, roles: ['Super Admin'] },
+    { id: 'vendors', label: 'Partners', icon: Store, roles: ['Super Admin'] },
     { id: 'users', label: 'Users', icon: LayoutGrid, roles: null },
     { id: 'devices', label: 'Devices', icon: Smartphone, roles: null },
     { id: 'projects', label: 'Projects', icon: FolderOpen, roles: null },

@@ -307,6 +307,44 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
+  // Add new user and persist to localStorage
+  const addUser = (newUser) => {
+    setUsers(prevUsers => {
+      // Generate userId if not provided
+      const maxNum = prevUsers.reduce((max, u) => {
+        const match = u.userId?.match(/USR(\d+)/);
+        return match ? Math.max(max, parseInt(match[1], 10)) : max;
+      }, 0);
+      const userId = newUser.userId || `USR${String(maxNum + 1).padStart(3, '0')}`;
+      const userWithId = { ...newUser, userId };
+      const updatedUsers = [...prevUsers, userWithId];
+      localStorage.setItem('vbsa_users', JSON.stringify(updatedUsers));
+      return updatedUsers;
+    });
+  };
+
+  // Add multiple users (for bulk upload)
+  const addUsers = (newUsers) => {
+    setUsers(prevUsers => {
+      let maxNum = prevUsers.reduce((max, u) => {
+        const match = u.userId?.match(/USR(\d+)/);
+        return match ? Math.max(max, parseInt(match[1], 10)) : max;
+      }, 0);
+      
+      const usersWithIds = newUsers.map(newUser => {
+        if (!newUser.userId) {
+          maxNum++;
+          return { ...newUser, userId: `USR${String(maxNum).padStart(3, '0')}` };
+        }
+        return newUser;
+      });
+      
+      const updatedUsers = [...prevUsers, ...usersWithIds];
+      localStorage.setItem('vbsa_users', JSON.stringify(updatedUsers));
+      return updatedUsers;
+    });
+  };
+
   // Sync user statuses with their vendor statuses
   const syncUserStatusesWithVendors = () => {
     setUsers(prevUsers => {
@@ -339,6 +377,8 @@ export const AuthProvider = ({ children }) => {
         deactivateUsersByVendor,
         updateVendor,
         addVendor,
+        addUser,
+        addUsers,
         syncUserStatusesWithVendors,
         roleHierarchy: ROLE_HIERARCHY,
         users,
