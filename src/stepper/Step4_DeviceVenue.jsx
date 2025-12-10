@@ -33,6 +33,14 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
 
   // Auto-calculate buffer as 10% of required (rounded up)
   const calculateBuffer = (required) => Math.ceil(required * 0.1);
+
+  // Helper: Generate random device requirements for a date
+  const generateRandomDeviceDataForDate = () => {
+    return {
+      required: Math.floor(Math.random() * 30) + 5, // 5-35
+      buffer: Math.floor(Math.random() * 8) + 1,    // 1-8
+    };
+  };
   
   // Get unique venues from partner<>venue mappings (Step 2)
   const mappedVenues = useMemo(() => {
@@ -75,6 +83,51 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
     return initial;
   };
 
+  // Initialize per-date device data with random values
+  const initializePerDateDeviceData = () => {
+    const dateData = {};
+    (formData.selectedDates || []).forEach(date => {
+      const mappingsForDate = [];
+      mappedVenues.forEach(venueName => {
+        DEVICE_TYPES.forEach(device => {
+          const randomData = generateRandomDeviceDataForDate();
+          // For lab-wise devices (Body Cam, CCTV Kit) create two lab rows: Lab-1 and Lab-2
+          const labDevices = ['Body Cam', 'CCTV Kit'];
+          if (labDevices.includes(device.name)) {
+            ['Lab-1', 'Lab-2'].forEach(lab => {
+              mappingsForDate.push({
+                venueName,
+                locationType: lab,
+                deviceType: device.name,
+                deviceId: device.id,
+                candidates: VENUE_CANDIDATES[venueName] || 100,
+                required: Math.max(1, Math.floor(randomData.required / 2)),
+                buffer: Math.max(0, Math.floor(randomData.buffer / 2)),
+                sent: 0,
+                received: 0,
+              });
+            });
+          } else {
+            // Common devices
+            mappingsForDate.push({
+              venueName,
+              locationType: 'Common',
+              deviceType: device.name,
+              deviceId: device.id,
+              candidates: VENUE_CANDIDATES[venueName] || 100,
+              required: randomData.required,
+              buffer: randomData.buffer,
+              sent: 0,
+              received: 0,
+            });
+          }
+        });
+      });
+      dateData[date] = mappingsForDate;
+    });
+    return dateData;
+  };
+
   const [deviceMappings, setDeviceMappings] = useState(() => {
     // If formData contains device requirement rows (has `required` field), reuse them.
     if (formData.mappedDevices && formData.mappedDevices.length > 0 && formData.mappedDevices[0].required !== undefined) {
@@ -82,6 +135,14 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
     }
     // otherwise initialize requirement rows freshly
     return createInitialMappings();
+  });
+
+  // Per-date device mappings with random data
+  const [perDateDeviceMappings, setPerDateDeviceMappings] = useState(() => {
+    if (formData.perDateDeviceMappings) {
+      return formData.perDateDeviceMappings;
+    }
+    return initializePerDateDeviceData();
   });
 
   // Actual mapped devices (instances) — empty by default, stored in formData.mappedDevices
@@ -122,6 +183,12 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
   const [deviceActivities, setDeviceActivities] = useState(() => formData.deviceActivities || []);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [activityForm, setActivityForm] = useState({ venueName: '', deviceType: '', action: 'send', quantity: 1, remarks: '' });
+
+  // Selected date for Device Handling Status
+  const [selectedStatusDate, setSelectedStatusDate] = useState(() => {
+    const dates = formData.selectedDates || [];
+    return dates.length > 0 ? dates[0] : '';
+  });
 
   const toggleSelectDevice = (deviceId) => {
     const s = new Set(selectedDevices);
@@ -185,12 +252,23 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
     return list;
   }, [filterMapDeviceType, filterMapPartnerName, mapSearchQuery]);
 
-  // Re-initialize when venues change
+  // Re-initialize when venues or dates change
   useEffect(() => {
     if (mappedVenues.length > 0 && (!deviceMappings || deviceMappings.length === 0)) {
       setDeviceMappings(createInitialMappings());
     }
-  }, [mappedVenues]);
+    // Re-generate per-date device data when dates change
+    setPerDateDeviceMappings(initializePerDateDeviceData());
+  }, [mappedVenues, formData.selectedDates]);
+
+  // Get device mappings for the selected date
+  const adjustedDeviceMappings = useMemo(() => {
+    if (!selectedStatusDate) {
+      return deviceMappings;
+    }
+    // Return the specific mappings for the selected date
+    return perDateDeviceMappings[selectedStatusDate] || deviceMappings;
+  }, [selectedStatusDate, perDateDeviceMappings, deviceMappings]);
 
   // Calculate total for a device row
   const calculateTotal = (required, buffer) => required + buffer;
@@ -213,21 +291,27 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
   // Save to formData
   const handleSave = () => {
     const nowIso = new Date().toISOString();
-    // Persist only the actual mapped devices (instances), not the requirement rows
-    setFormData({ ...formData, mappedDevices: mappedDevicesList, mappedDevicesSavedAt: nowIso, mappedDevicesBy: user?.fullName || 'Unknown' });
+    // Persist the per-date device mappings and actual mapped devices (instances)
+    setFormData({ 
+      ...formData, 
+      perDateDeviceMappings, 
+      mappedDevices: mappedDevicesList, 
+      mappedDevicesSavedAt: nowIso, 
+      mappedDevicesBy: user?.fullName || 'Unknown' 
+    });
   };
 
   // Group data by venue for merged rows
   const groupedByVenue = useMemo(() => {
     const grouped = {};
-    deviceMappings.forEach((row, idx) => {
+    adjustedDeviceMappings.forEach((row, idx) => {
       if (!grouped[row.venueName]) {
         grouped[row.venueName] = [];
       }
       grouped[row.venueName].push({ ...row, index: idx });
     });
     return grouped;
-  }, [deviceMappings]);
+  }, [adjustedDeviceMappings]);
 
   // Map venue -> partner name (safe lookup)
   const venueToPartner = useMemo(() => {
@@ -249,7 +333,34 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0, marginBottom: 12 }}>Device Handling Status</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 0 }}>Device Handling Status</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Select Date:</label>
+          <select
+            value={selectedStatusDate}
+            onChange={e => setSelectedStatusDate(e.target.value)}
+            style={{
+              padding: '6px 8px',
+              borderRadius: 6,
+              border: '1px solid #d1d5db',
+              fontSize: 12,
+              fontWeight: 500,
+              color: '#374151',
+              background: 'white',
+              cursor: 'pointer',
+              minWidth: 150,
+            }}
+          >
+            <option value="">Select a date</option>
+            {(formData.selectedDates || []).map(date => (
+              <option key={date} value={date}>
+                {new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div style={{ background: 'white', borderRadius: 8, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
         {deviceMappings.length === 0 ? (
@@ -261,6 +372,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                 <thead>
                   <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
                     <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>Venue</th>
+                    <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>Common/Lab-wise</th>
                     <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>Device</th>
                     <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -306,111 +418,131 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(groupedByVenue).map(([venueName, devices]) => (
-                    devices.map((row, deviceIdx) => (
-                      <tr key={row.index} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        {deviceIdx === 0 && (
-                          <td rowSpan={devices.length} style={{ padding: '6px', verticalAlign: 'middle', fontWeight: 600, fontSize: 12, borderRight: '1px solid #e5e7eb' }}>
-                            {venueName}
-                          </td>
-                        )}
-                        <td style={{ padding: '6px', borderRight: '1px solid #e5e7eb' }}>
-                          <span style={{ padding: '3px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: '#f0f4ff', color: 'var(--color-primary)' }}>
-                            {row.deviceType}
-                          </span>
-                        </td>
-                        <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
-                          <input
-                            type="number"
-                            value={row.required}
-                            readOnly
-                            style={{
-                              width: 50,
-                              padding: '4px 4px',
-                              borderRadius: 3,
-                              border: '1px solid #d1d5db',
-                              background: '#f9fafb',
-                              textAlign: 'center',
-                              cursor: 'not-allowed',
-                              fontSize: 12,
-                            }}
-                          />
-                        </td>
-                        <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
-                          <input
-                            type="number"
-                            value={typeof row.buffer !== 'undefined' ? row.buffer : calculateBuffer(row.required)}
-                            readOnly={!isEditingBuffers}
-                            onChange={e => handleChange(row.index, 'buffer', e.target.value)}
-                            style={{
-                              width: 50,
-                              padding: '4px 4px',
-                              borderRadius: 3,
-                              border: '1px solid #d1d5db',
-                              background: isEditingBuffers ? 'white' : '#f9fafb',
-                              textAlign: 'center',
-                              cursor: isEditingBuffers ? 'text' : 'not-allowed',
-                              fontSize: 12,
-                            }}
-                          />
-                        </td>
-                        <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
-                          <input
-                            type="number"
-                            value={calculateTotal(row.required, (typeof row.buffer !== 'undefined' && row.buffer !== null) ? Number(row.buffer) : calculateBuffer(row.required))}
-                            readOnly
-                            style={{
-                              width: 50,
-                              padding: '4px 4px',
-                              borderRadius: 3,
-                              border: '1px solid #d1d5db',
-                              background: '#f9fafb',
-                              textAlign: 'center',
-                              cursor: 'not-allowed',
-                              fontSize: 12,
-                              fontWeight: 600,
-                            }}
-                          />
-                        </td>
-                        <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
-                          <input
-                            type="number"
-                            value={row.received || 0}
-                            disabled
-                            style={{
-                              width: 50,
-                              padding: '4px 4px',
-                              borderRadius: 3,
-                              border: '1px solid #d1d5db',
-                              textAlign: 'center',
-                              fontSize: 12,
-                              background: '#fafafa'
-                            }}
-                          />
-                        </td>
-                        <td style={{ padding: '6px', textAlign: 'center' }}>
-                          {(() => {
-                            const total = calculateTotal(row.required, calculateBuffer(row.required));
-                            const variance = getVariance(row.received, total);
-                            return (
-                              <span
-                                style={{
-                                  padding: '3px 6px',
-                                  borderRadius: 3,
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  background: variance.color + '20',
-                                  color: variance.color,
-                                }}
-                              >
-                                {variance.status} {variance.count}
+                  {Object.entries(groupedByVenue).map(([venueName, devices]) => {
+                    // desired order of location groups
+                    const locationOrder = ['Common', 'Lab-1', 'Lab-2'];
+                    // group devices by locationType preserving order
+                    const groups = locationOrder
+                      .map(loc => ({ loc, rows: devices.filter(d => (d.locationType || 'Common') === loc) }))
+                      .filter(g => g.rows.length > 0);
+
+                    const rowsJsx = [];
+                    groups.forEach((group, groupIdx) => {
+                      group.rows.forEach((row, idx) => {
+                        rowsJsx.push(
+                          <tr key={`${row.deviceId}-${row.locationType}-${row.index || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            {/* venue cell only on first overall row for this venue */}
+                            {groupIdx === 0 && idx === 0 && (
+                              <td rowSpan={devices.length} style={{ padding: '6px', verticalAlign: 'middle', fontWeight: 600, fontSize: 12, borderRight: '1px solid #e5e7eb' }}>
+                                {venueName}
+                              </td>
+                            )}
+                            {/* location cell only on first row of the group */}
+                            {idx === 0 && (
+                              <td rowSpan={group.rows.length} style={{ padding: '6px', borderRight: '1px solid #e5e7eb', verticalAlign: 'middle', fontWeight: 600 }}>
+                                {group.loc}
+                              </td>
+                            )}
+                            <td style={{ padding: '6px', borderRight: '1px solid #e5e7eb' }}>
+                              <span style={{ padding: '3px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: '#f0f4ff', color: 'var(--color-primary)' }}>
+                                {row.deviceType}
                               </span>
-                            );
-                          })()}
-                        </td>
-                      </tr>
-                    ))
-                  ))}
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
+                              <input
+                                type="number"
+                                value={row.required}
+                                readOnly
+                                style={{
+                                  width: 50,
+                                  padding: '4px 4px',
+                                  borderRadius: 3,
+                                  border: '1px solid #d1d5db',
+                                  background: '#f9fafb',
+                                  textAlign: 'center',
+                                  cursor: 'not-allowed',
+                                  fontSize: 12,
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
+                              <input
+                                type="number"
+                                value={typeof row.buffer !== 'undefined' ? row.buffer : calculateBuffer(row.required)}
+                                readOnly={!isEditingBuffers}
+                                onChange={e => handleChange(row.index, 'buffer', e.target.value)}
+                                style={{
+                                  width: 50,
+                                  padding: '4px 4px',
+                                  borderRadius: 3,
+                                  border: '1px solid #d1d5db',
+                                  background: isEditingBuffers ? 'white' : '#f9fafb',
+                                  textAlign: 'center',
+                                  cursor: isEditingBuffers ? 'text' : 'not-allowed',
+                                  fontSize: 12,
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
+                              <input
+                                type="number"
+                                value={calculateTotal(row.required, (typeof row.buffer !== 'undefined' && row.buffer !== null) ? Number(row.buffer) : calculateBuffer(row.required))}
+                                readOnly
+                                style={{
+                                  width: 50,
+                                  padding: '4px 4px',
+                                  borderRadius: 3,
+                                  border: '1px solid #d1d5db',
+                                  background: '#f9fafb',
+                                  textAlign: 'center',
+                                  cursor: 'not-allowed',
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
+                              <input
+                                type="number"
+                                value={row.received || 0}
+                                disabled
+                                style={{
+                                  width: 50,
+                                  padding: '4px 4px',
+                                  borderRadius: 3,
+                                  border: '1px solid #d1d5db',
+                                  textAlign: 'center',
+                                  fontSize: 12,
+                                  background: '#fafafa'
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center' }}>
+                              {(() => {
+                                const total = calculateTotal(row.required, calculateBuffer(row.required));
+                                const variance = getVariance(row.received, total);
+                                return (
+                                  <span
+                                    style={{
+                                      padding: '3px 6px',
+                                      borderRadius: 3,
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      background: variance.color + '20',
+                                      color: variance.color,
+                                    }}
+                                  >
+                                    {variance.count}
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    });
+                    return rowsJsx;
+                  })}
                 </tbody>
               </table>
             </div>

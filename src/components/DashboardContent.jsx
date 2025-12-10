@@ -11,6 +11,7 @@ import StepperMain from '../stepper/StepperMain';
 import ReportsView from './views/ReportsView';
 import VendorsView from './views/VendorsView';
 import ConfigurationView from './views/ConfigurationView';
+import NotificationsView from './views/NotificationsView';
 import './DashboardContent.css';
 
 const DashboardContent = ({ activeMenu, userRole, subView, setSubView }) => {
@@ -35,6 +36,8 @@ const DashboardContent = ({ activeMenu, userRole, subView, setSubView }) => {
     switch (activeMenu) {
       case 'dashboard':
         return <DashboardView userRole={userRole} />;
+      case 'notifications':
+        return <NotificationsView />;
       case 'users':
         return <UsersView />;
       case 'devices':

@@ -205,6 +205,8 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
   const [showChecklistModal, setShowChecklistModal] = useState(false);
   const [checklistSessionId, setChecklistSessionId] = useState(null);
   const [checklistForm, setChecklistForm] = useState({});
+  const [activeChecklistTab, setActiveChecklistTab] = useState('checklist1'); // 'checklist1' or 'checklist2'
+  const [checklistSubmissions, setChecklistSubmissions] = useState({ checklist1: null, checklist2: null }); // track submissions for both
   const [emergencyFaceImage, setEmergencyFaceImage] = useState('');
   const [emergencyShowCamera, setEmergencyShowCamera] = useState(false);
   const emergencyVideoRef = useRef(null);
@@ -599,15 +601,25 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
     const countByRole = (role) => presentRecords.filter(r => (r.userRole || '').toLowerCase().includes(role.toLowerCase())).length;
     const getUsersByRole = (role) => presentRecords.filter(r => (r.userRole || '').toLowerCase().includes(role.toLowerCase()));
 
-    // Get session date and time
+    // Get session date and time, calculate T-60 and T-30
     let sessionDate = '';
     let sessionTime = '';
+    let checklist1Time = '';
+    let checklist2Time = '';
     try {
       const startDt = session.startISO ? new Date(session.startISO) : null;
       const endDt = session.endISO ? new Date(session.endISO) : null;
       if (startDt && !isNaN(startDt.getTime())) {
         sessionDate = startDt.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
         sessionTime = `${startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} to ${endDt ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}`;
+        
+        // Calculate T-60 (60 minutes before session start)
+        const t60Dt = new Date(startDt.getTime() - 60 * 60 * 1000);
+        checklist1Time = `${String(t60Dt.getHours()).padStart(2, '0')}:${String(t60Dt.getMinutes()).padStart(2, '0')}`;
+        
+        // Calculate T-30 (30 minutes before session start)
+        const t30Dt = new Date(startDt.getTime() - 30 * 60 * 1000);
+        checklist2Time = `${String(t30Dt.getHours()).padStart(2, '0')}:${String(t30Dt.getMinutes()).padStart(2, '0')}`;
       }
     } catch (e) { /* ignore */ }
 
@@ -641,6 +653,8 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
       // Examination Info
       examDate: sessionDate || '03/12/2025',
       examBatch: sessionTime || '09:00 AM to 12:00 PM',
+      checklist1Time: checklist1Time || '08:00',
+      checklist2Time: checklist2Time || '08:30',
 
       // Venue Info
       venueState: venueState,
@@ -710,19 +724,33 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
     if (!checklistForm.venueObserverPresent) { alert('Please select if venue observer is present'); return; }
 
     // Save checklist to formData
+    const checklistType = activeChecklistTab || 'checklist1';
+    const scheduledTime = checklistType === 'checklist1' ? checklistForm.checklist1Time : checklistForm.checklist2Time;
+    const actualSubmitISO = new Date().toISOString();
+    const actualDt = new Date(actualSubmitISO);
+    const actualSubmitTime = `${String(actualDt.getHours()).padStart(2, '0')}:${String(actualDt.getMinutes()).padStart(2, '0')}`;
+
     const checklistData = {
       sessionId: checklistSessionId,
-      submittedAt: new Date().toISOString(),
+      checklistType,
+      scheduledTime,
+      actualSubmitISO,
+      actualSubmitTime,
+      submittedAt: actualSubmitISO,
       submittedBy: user?.fullName || 'Unknown',
       ...checklistForm
     };
 
     const existingChecklists = formData.venueChecklists || [];
-    const updatedChecklists = [...existingChecklists.filter(c => c.sessionId !== checklistSessionId), checklistData];
+    // Replace only the checklist for this session + type
+    const updatedChecklists = [
+      ...existingChecklists.filter(c => !(c.sessionId === checklistSessionId && c.checklistType === checklistType)),
+      checklistData
+    ];
     setFormData({ ...formData, venueChecklists: updatedChecklists });
 
     setShowChecklistModal(false);
-    alert('Venue Checklist submitted successfully!');
+    alert('Venue Checklist submitted successfully! (Saved actual submit time)');
   };
 
   return (
@@ -869,13 +897,67 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                   })()}
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); openChecklistModal(s); }} 
-                    style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
-                  >
-                    Submit Venue Checklist
-                  </button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {(() => {
+                    // Calculate T-60 and T-30 for this session
+                    let t60Time = '—', t30Time = '—';
+                    try {
+                      let startDt = null;
+                      try {
+                        startDt = s.startISO ? new Date(s.startISO) : (s.raw && (s.raw.startISO || s.raw.start)) ? new Date(s.raw.startISO || s.raw.start) : null;
+                      } catch (e) { startDt = null; }
+                      if (startDt && !isNaN(startDt.getTime())) {
+                        const t60Dt = new Date(startDt.getTime() - 60 * 60 * 1000);
+                        const t30Dt = new Date(startDt.getTime() - 30 * 60 * 1000);
+                        // Format times as HH:MM (24-hour)
+                        t60Time = `${String(t60Dt.getHours()).padStart(2, '0')}:${String(t60Dt.getMinutes()).padStart(2, '0')}`;
+                        t30Time = `${String(t30Dt.getHours()).padStart(2, '0')}:${String(t30Dt.getMinutes()).padStart(2, '0')}`;
+                      }
+                    } catch (e) { /* ignore */ }
+                    
+                    // Check if checklist already submitted for this session
+                    const existingChecklists = formData.venueChecklists || [];
+                    const existingChecklist1 = existingChecklists.find(c => c.sessionId === s.id && c.checklistType === 'checklist1');
+                    const existingChecklist2 = existingChecklists.find(c => c.sessionId === s.id && c.checklistType === 'checklist2');
+
+                    return (
+                      <>
+                        {existingChecklist1 ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); /* show details maybe */ setActiveChecklistTab('checklist1'); openChecklistModal(s); }}
+                            title={`Submitted at ${existingChecklist1.actualSubmitTime || existingChecklist1.actualSubmitISO || '—'}`}
+                            style={{ padding: '6px 10px', borderRadius: 8, background: '#065f46', color: 'white', border: 'none', cursor: 'default', fontWeight: 600, fontSize: 12 }}
+                          >
+                            Checklist-1 Submitted ({existingChecklist1.actualSubmitTime || existingChecklist1.actualSubmitISO || '—'})
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setActiveChecklistTab('checklist1'); openChecklistModal(s); }} 
+                            style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                          >
+                            Submit Checklist-1 (T-60: {t60Time})
+                          </button>
+                        )}
+
+                        {existingChecklist2 ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setActiveChecklistTab('checklist2'); openChecklistModal(s); }}
+                            title={`Submitted at ${existingChecklist2.actualSubmitTime || existingChecklist2.actualSubmitISO || '—'}`}
+                            style={{ padding: '6px 10px', borderRadius: 8, background: '#075985', color: 'white', border: 'none', cursor: 'default', fontWeight: 600, fontSize: 12 }}
+                          >
+                            Checklist-2 Submitted ({existingChecklist2.actualSubmitTime || existingChecklist2.actualSubmitISO || '—'})
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setActiveChecklistTab('checklist2'); openChecklistModal(s); }} 
+                            style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                          >
+                            Submit Checklist-2 (T-30: {t30Time})
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                   {allocated.length > 0 && (
                     <button onClick={(e) => { e.stopPropagation(); const list = allocated; setDeallocateList(list); setDeallocateSessionId(s.id); setSelectedDeallocateIds(new Set(list.map(d => d.userId))); setShowDeallocateModal(true); }} style={{ padding: '6px 10px', borderRadius: 8, background: 'white', border: '1px solid #e5e7eb', cursor: 'pointer' }}>Deallocate Device</button>
                   )}
@@ -1230,17 +1312,54 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
       {showChecklistModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400 }} onClick={() => setShowChecklistModal(false)}>
           <div style={{ width: 900, maxWidth: '95%', maxHeight: '90vh', background: 'white', borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            {/* Header */}
+            {/* Header with Tabs */}
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', borderRadius: '12px 12px 0 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 22 }}>📋</span>
-                <span style={{ fontWeight: 700, fontSize: 18, color: 'white' }}>Venue Checklist</span>
+                <div>
+                  <span style={{ fontWeight: 700, fontSize: 18, color: 'white' }}>Venue Checklist</span>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      onClick={() => setActiveChecklistTab('checklist1')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        border: activeChecklistTab === 'checklist1' ? 'none' : '1px solid rgba(255,255,255,0.3)',
+                        background: activeChecklistTab === 'checklist1' ? 'rgba(255,255,255,0.3)' : 'transparent',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: 13,
+                      }}
+                    >
+                      Checklist-1 (T-60 min: {checklistForm.checklist1Time || '—'})
+                    </button>
+                    <button
+                      onClick={() => setActiveChecklistTab('checklist2')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        border: activeChecklistTab === 'checklist2' ? 'none' : '1px solid rgba(255,255,255,0.3)',
+                        background: activeChecklistTab === 'checklist2' ? 'rgba(255,255,255,0.3)' : 'transparent',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: 13,
+                      }}
+                    >
+                      Checklist-2 (T-30 min: {checklistForm.checklist2Time || '—'})
+                    </button>
+                  </div>
+                </div>
               </div>
               <button onClick={() => setShowChecklistModal(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', fontSize: 20, color: 'white', cursor: 'pointer', borderRadius: 6, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
 
             {/* Scrollable Content */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+              {/* CHECKLIST-1: Infrastructure Sections (8:00 AM) */}
+              {activeChecklistTab === 'checklist1' && (
+                <>
               {/* Centre Manager Information */}
               <div style={{ marginBottom: 24 }}>
                 <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Centre Manager Information</h4>
@@ -1403,6 +1522,64 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                       <option value="Yes">Yes</option>
                       <option value="No">No</option>
                     </select>
+                  </div>
+                </div>
+              </div>
+                </>
+              )}
+
+              {/* CHECKLIST-2: Personnel & Device Sections (8:30 AM) */}
+              {activeChecklistTab === 'checklist2' && (
+                <>
+              {/* Centre Manager Information (repeated for Checklist-2) */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#0891b2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Centre Manager Information</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Name of Centre Manager</label>
+                    <input value={checklistForm.centreManagerName || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Email ID</label>
+                    <input value={checklistForm.centreManagerEmail || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Mobile Number</label>
+                    <input value={checklistForm.centreManagerMobile || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Examination Details (repeated for Checklist-2) */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#0891b2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Examination Details</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Date of Examination</label>
+                    <input value={checklistForm.examDate || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Batch of Examination</label>
+                    <input value={checklistForm.examBatch || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Venue Information (repeated for Checklist-2) */}
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700, color: '#0891b2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Venue Information</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>State</label>
+                    <input value={checklistForm.venueState || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>City</label>
+                    <input value={checklistForm.venueCity || ''} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Venue Name & Code</label>
+                    <input value={`${checklistForm.venueName || ''} (${checklistForm.venueCode || ''})`} readOnly style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: 13 }} />
                   </div>
                 </div>
               </div>
@@ -1571,12 +1748,16 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                   </div>
                 </div>
               </div>
+                </>
+              )}
             </div>
 
             {/* Footer */}
             <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: 12, background: '#f9fafb', borderRadius: '0 0 12px 12px' }}>
               <button onClick={() => setShowChecklistModal(false)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Cancel</button>
-              <button onClick={handleChecklistSubmit} style={{ padding: '10px 20px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Submit Checklist</button>
+              <button onClick={handleChecklistSubmit} style={{ padding: '10px 20px', borderRadius: 8, background: activeChecklistTab === 'checklist1' ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
+                Submit {activeChecklistTab === 'checklist1' ? 'Checklist-1' : 'Checklist-2'}
+              </button>
             </div>
           </div>
         </div>

@@ -1,24 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { Trash2, Edit2, Filter, X } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Trash2, Edit2, Filter, X, Upload, Download } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfig } from '../../contexts/ConfigContext';
 
 const DevicesView = () => {
-  const { user, roleHierarchy, getVisibleUsers } = useAuth();
-  const [devices] = useState([
-    { deviceId: 'DV-1001', modelNo: 'FPT-BIO-2024A', type: 'Biometric Device', vendorName: 'FingerPrint Tech', status: 'Active', syncedOn: '2025-11-21 09:17:10', assignedRole: 'Biometric Operator' },
-    { deviceId: 'DV-1002', modelNo: 'ACP-BC-X500', type: 'Body Camera', vendorName: 'ActionCam Pro', status: 'Maintenance', syncedOn: '2025-11-20 18:45:02', assignedRole: 'Body Cam Operator' },
-    { deviceId: 'DV-1003', modelNo: 'CI-SRV-PRO-8', type: 'Server', vendorName: 'Cloud Infrastructure Inc', status: 'Active', syncedOn: '2025-11-21 08:55:44', assignedRole: 'Server Manager' },
-    { deviceId: 'DV-1004', modelNo: 'SVS-CAM-4K-02', type: 'CCTV', vendorName: 'SecureVision Systems', status: 'Active', syncedOn: '2025-11-21 09:20:01', assignedRole: 'CCTV Technician' },
-    { deviceId: 'DV-1005', modelNo: 'BMI-TERM-500', type: 'Biometric Device', vendorName: 'BioMetrics India', status: 'Active', syncedOn: '2025-11-21 07:45:12', assignedRole: 'Venue Staff' },
-    { deviceId: 'DV-1006', modelNo: 'BTS-BC-PRO-2', type: 'Body Camera', vendorName: 'BodyTrack Solutions', status: 'Active', syncedOn: '2025-11-21 06:30:55', assignedRole: 'Body Cam Operator' },
-    { deviceId: 'DV-1007', modelNo: 'NSL-SRV-ENT-4', type: 'Server', vendorName: 'Network Solutions Ltd', status: 'Active', syncedOn: '2025-11-20 22:10:05', assignedRole: 'Server Manager' },
-    { deviceId: 'DV-1008', modelNo: 'CGI-CAM-HD-03', type: 'CCTV', vendorName: 'CameraGuard India', status: 'Active', syncedOn: '2025-11-21 05:50:33', assignedRole: 'CCTV Technician' },
-    { deviceId: 'DV-1009', modelNo: 'FPT-BIO-2024B', type: 'Biometric Device', vendorName: 'FingerPrint Tech', status: 'Active', syncedOn: '2025-11-18 11:12:09', assignedRole: 'Venue Staff' },
-    { deviceId: 'DV-1010', modelNo: 'ACP-BC-X300', type: 'Body Camera', vendorName: 'ActionCam Pro', status: 'Inactive', syncedOn: '2025-11-15 14:20:00', assignedRole: 'Event Manager' },
-    { deviceId: 'DV-1011', modelNo: 'CI-SRV-STD-4', type: 'Server', vendorName: 'Cloud Infrastructure Inc', status: 'Active', syncedOn: '2025-11-21 09:00:00', assignedRole: 'Server Manager' },
-    { deviceId: 'DV-1012', modelNo: 'SVS-CAM-4K-04', type: 'CCTV', vendorName: 'SecureVision Systems', status: 'Active', syncedOn: '2025-11-20 08:05:44', assignedRole: 'CCTV Technician' },
-  ]);
+  const { user, roleHierarchy, getVisibleUsers, devices, addDevices, getVisibleDevices } = useAuth();
+
+  // Bulk upload state for devices
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkUploadFile, setBulkUploadFile] = useState(null);
+  const [bulkUploadError, setBulkUploadError] = useState('');
+  const [bulkUploadSuccess, setBulkUploadSuccess] = useState('');
+  const fileInputRef = useRef(null);
 
   // Determine allowed roles for the current user
   const allowedRoles = useMemo(() => {
@@ -26,12 +19,14 @@ const DevicesView = () => {
     return roleHierarchy[user.role].canViewRoles;
   }, [user, roleHierarchy]);
 
-  // Filter devices based on allowed roles
+  // Use getVisibleDevices from context which applies role-based filtering
   const visibleDevices = useMemo(() => {
+    if (typeof getVisibleDevices === 'function') return getVisibleDevices();
+    // Fallback to basic filtering
     if (!user) return [];
-    if (!allowedRoles) return devices; // Super Admin, Project Manager, Server Manager see all
+    if (!allowedRoles) return devices;
     return devices.filter(device => allowedRoles.includes(device.assignedRole));
-  }, [devices, allowedRoles, user]);
+  }, [getVisibleDevices, devices, allowedRoles, user]);
 
   // Filter modal and filter state
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -59,6 +54,119 @@ const DevicesView = () => {
       return typeMatch && vendorMatch && statusMatch;
     });
   }, [visibleDevices, filterDeviceType, filterVendorName, filterStatus]);
+
+  // Download CSV template for device bulk upload
+  const downloadTemplate = () => {
+    const headers = [
+      'Device ID',
+      'Model No',
+      'Device Type',
+      'Vendor Organization',
+      'Status (Active/Inactive/Maintenance)',
+      'Synced On (optional)',
+      'Assigned Role'
+    ];
+
+    const sampleRow = [
+      'DV-2001',
+      'FPT-BIO-2024A',
+      'Biometric Device',
+      'FingerPrint Tech',
+      'Active',
+      '2025-11-21 09:17:10',
+      'Biometric Operator'
+    ];
+
+    const csvContent = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'device_bulk_upload_template.csv';
+    link.click();
+  };
+
+  // Handle bulk upload file selection
+  const handleBulkFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.name.endsWith('.csv') && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        setBulkUploadError('Please upload a CSV or Excel file');
+        setBulkUploadFile(null);
+        return;
+      }
+      setBulkUploadFile(file);
+      setBulkUploadError('');
+    }
+  };
+
+  // Process bulk upload
+  const handleBulkUpload = () => {
+    if (!bulkUploadFile) {
+      setBulkUploadError('Please select a file to upload');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+
+        if (lines.length < 2) {
+          setBulkUploadError('File must contain header row and at least one data row');
+          return;
+        }
+
+        const newDevices = [];
+        const errors = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          if (values.length < 4) {
+            errors.push(`Row ${i + 1}: Incomplete data (expected at least 4 columns)`);
+            continue;
+          }
+
+          const deviceData = {
+            deviceId: values[0] || `DV-${Date.now()}-${i}`,
+            modelNo: values[1] || '',
+            type: values[2] || '',
+            vendorName: values[3] || '',
+            status: values[4] || 'Active',
+            syncedOn: values[5] || new Date().toISOString().slice(0, 19).replace('T', ' '),
+            assignedRole: values[6] || '',
+          };
+
+          // Basic validation
+          if (!deviceData.modelNo) {
+            errors.push(`Row ${i + 1}: Model No is required`);
+            continue;
+          }
+          if (!deviceData.type) {
+            errors.push(`Row ${i + 1}: Device Type is required`);
+            continue;
+          }
+          newDevices.push(deviceData);
+        }
+
+        if (newDevices.length > 0) {
+          addDevices(newDevices);
+          setBulkUploadSuccess(`Successfully uploaded ${newDevices.length} device(s)${errors.length > 0 ? `. ${errors.length} row(s) had errors.` : ''}`);
+          setBulkUploadFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        } else {
+          setBulkUploadError('No valid data found in the file');
+        }
+
+        if (errors.length > 0) {
+          setBulkUploadError(errors.slice(0, 3).join('; ') + (errors.length > 3 ? `... and ${errors.length - 3} more errors` : ''));
+        }
+      } catch (err) {
+        setBulkUploadError('Error parsing file: ' + err.message);
+      }
+    };
+    reader.readAsText(bulkUploadFile);
+  };
 
   return (
     <div>
@@ -107,6 +215,25 @@ const DevicesView = () => {
                   {(filterDeviceType ? 1 : 0) + (filterVendorName ? 1 : 0) + (filterStatus ? 1 : 0)}
                 </span>
               )}
+            </button>
+            <button 
+              onClick={() => { setShowBulkUploadModal(true); setBulkUploadError(''); setBulkUploadSuccess(''); setBulkUploadFile(null); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 16px',
+                border: '1px solid #e5e7eb',
+                background: 'white',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#374151',
+              }}
+            >
+              <Upload size={16} />
+              Bulk Upload
             </button>
           </div>
         </div>
@@ -159,6 +286,71 @@ const DevicesView = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Bulk Upload Modal */}
+      {showBulkUploadModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
+          }}
+          onClick={() => setShowBulkUploadModal(false)}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '12px',
+              width: '90%',
+              maxWidth: '600px',
+              maxHeight: '85vh',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid #e5e7eb' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Upload size={20} />
+                Bulk Upload Devices
+              </h2>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button onClick={downloadTemplate} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', border: '1px solid #e5e7eb', background: 'white', borderRadius: '6px', cursor: 'pointer' }}>
+                  <Download size={16} />
+                  Download Template
+                </button>
+                <button onClick={() => setShowBulkUploadModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: '#6b7280' }}>
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+              <p style={{ color: '#6b7280', marginBottom: '12px' }}>Upload a CSV file with device details. The template provides expected columns.</p>
+
+              <div style={{ marginBottom: '12px' }}>
+                <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx" onChange={handleBulkFileChange} />
+              </div>
+
+              {bulkUploadError && <div style={{ color: '#dc2626', marginBottom: '8px' }}>{bulkUploadError}</div>}
+              {bulkUploadSuccess && <div style={{ color: '#059669', marginBottom: '8px' }}>{bulkUploadSuccess}</div>}
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', padding: '16px 24px', borderTop: '1px solid #e5e7eb', background: '#f9fafb' }}>
+              <button onClick={() => { setBulkUploadFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; setBulkUploadError(''); setBulkUploadSuccess(''); }} style={{ padding: '10px 20px', border: '1px solid #e5e7eb', background: 'white', borderRadius: '6px', cursor: 'pointer' }}>Clear</button>
+              <button onClick={handleBulkUpload} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-2) 100%)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Upload</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Filter Modal */}
       {showFilterModal && (
         <div

@@ -150,6 +150,15 @@ const ALL_VENDORS = [
   { id: 'v-mp-002', name: 'ManpowerHub Solutions', vendorTypes: ['Manpower Partner'], contactPerson: 'Divya Sharma', email: 'divya@manpowerhub.com', phone: '+91-9876543221', status: 'Active' },
 ];
 
+// Mock devices database
+const ALL_DEVICES = [
+  { deviceId: 'DV-1001', modelNo: 'FPT-BIO-2024A', type: 'Biometric Device', vendorName: 'FingerPrint Tech', status: 'Active', syncedOn: '2025-11-21 09:17:10', assignedRole: 'Biometric Operator' },
+  { deviceId: 'DV-1002', modelNo: 'ACP-BC-X500', type: 'Body Camera', vendorName: 'ActionCam Pro', status: 'Maintenance', syncedOn: '2025-11-20 18:45:02', assignedRole: 'Body Cam Operator' },
+  { deviceId: 'DV-1003', modelNo: 'CI-SRV-PRO-8', type: 'Server', vendorName: 'Cloud Infrastructure Inc', status: 'Active', syncedOn: '2025-11-21 08:55:44', assignedRole: 'Server Manager' },
+  { deviceId: 'DV-1004', modelNo: 'SVS-CAM-4K-02', type: 'CCTV', vendorName: 'SecureVision Systems', status: 'Active', syncedOn: '2025-11-21 09:20:01', assignedRole: 'CCTV Technician' },
+  { deviceId: 'DV-1005', modelNo: 'BMI-TERM-500', type: 'Biometric Device', vendorName: 'BioMetrics India', status: 'Active', syncedOn: '2025-11-21 07:45:12', assignedRole: 'Venue Staff' },
+];
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -186,6 +195,12 @@ export const AuthProvider = ({ children }) => {
   const [vendors, setVendors] = useState(() => {
     const savedVendors = localStorage.getItem('vbsa_vendors');
     return savedVendors ? JSON.parse(savedVendors) : ALL_VENDORS;
+  });
+
+  // Initialize devices from localStorage or use default ALL_DEVICES
+  const [devices, setDevices] = useState(() => {
+    const saved = localStorage.getItem('vbsa_devices');
+    return saved ? JSON.parse(saved) : ALL_DEVICES;
   });
 
   const login = (role, username, password) => {
@@ -345,6 +360,54 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
+  // Generate deviceId if missing
+  const ensureDeviceId = (deviceList) => {
+    return deviceList.map((d, index) => {
+      if (!d.deviceId) {
+        return { ...d, deviceId: `DV-${Date.now()}-${index}` };
+      }
+      return d;
+    });
+  };
+
+  // Add new device and persist to localStorage
+  const addDevice = (newDevice) => {
+    setDevices(prevDevices => {
+      const deviceWithId = newDevice.deviceId ? newDevice : { ...newDevice, deviceId: `DV-${Date.now()}` };
+      const updatedDevices = [...prevDevices, deviceWithId];
+      localStorage.setItem('vbsa_devices', JSON.stringify(updatedDevices));
+      return updatedDevices;
+    });
+  };
+
+  // Add multiple devices (for bulk upload)
+  const addDevices = (newDevices) => {
+    setDevices(prevDevices => {
+      const devicesWithIds = ensureDeviceId(newDevices);
+      const updatedDevices = [...prevDevices, ...devicesWithIds];
+      localStorage.setItem('vbsa_devices', JSON.stringify(updatedDevices));
+      return updatedDevices;
+    });
+  };
+
+  // Get devices that the current logged-in user can view based on their role
+  const getVisibleDevices = () => {
+    if (!user) return [];
+
+    const userRole = user.role;
+    const roleConfig = ROLE_HIERARCHY[userRole];
+
+    if (!roleConfig) return [];
+
+    // Super Admin, Project Manager, Server Manager can see all devices
+    if (roleConfig.canViewRoles === null) {
+      return devices;
+    }
+
+    // Filter devices based on allowed assignedRole
+    return devices.filter((d) => roleConfig.canViewRoles.includes(d.assignedRole));
+  };
+
   // Sync user statuses with their vendor statuses
   const syncUserStatusesWithVendors = () => {
     setUsers(prevUsers => {
@@ -379,6 +442,10 @@ export const AuthProvider = ({ children }) => {
         addVendor,
         addUser,
         addUsers,
+        devices,
+        addDevice,
+        addDevices,
+        getVisibleDevices,
         syncUserStatusesWithVendors,
         roleHierarchy: ROLE_HIERARCHY,
         users,

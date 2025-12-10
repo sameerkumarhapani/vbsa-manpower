@@ -1,13 +1,16 @@
-import React from 'react';
-import { Layout, LayoutGrid, Smartphone, FolderOpen, FileText, Store, Settings, LogOut } from 'lucide-react';
+import React, { useState } from 'react';
+import { Layout, LayoutGrid, Smartphone, FolderOpen, FileText, Store, Settings, LogOut, Bell } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Sidebar.css';
+import ProfileModal from './ProfileModal';
 
 const Sidebar = ({ activeMenu, setActiveMenu }) => {
   const { user, logout } = useAuth();
+  const [showProfile, setShowProfile] = useState(false);
 
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Layout, roles: null },
+    { id: 'notifications', label: 'Notifications', icon: Bell, roles: null },
     { id: 'vendors', label: 'Partners', icon: Store, roles: ['Super Admin'] },
     { id: 'users', label: 'Users', icon: LayoutGrid, roles: null },
     { id: 'devices', label: 'Devices', icon: Smartphone, roles: null },
@@ -46,7 +49,7 @@ const Sidebar = ({ activeMenu, setActiveMenu }) => {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="user-info">
+        <div className="user-info" style={{ cursor: 'pointer' }} onClick={() => setShowProfile(true)}>
           <div className="user-avatar">{user?.fullName.charAt(0)}</div>
           <div className="user-details">
             <p className="user-name">{user?.fullName}</p>
@@ -58,6 +61,8 @@ const Sidebar = ({ activeMenu, setActiveMenu }) => {
           <span>Logout</span>
         </button>
       </div>
+
+      {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} />}
     </div>
   );
 };
