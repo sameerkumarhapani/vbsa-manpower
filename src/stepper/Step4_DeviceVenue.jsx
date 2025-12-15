@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { HelpCircle, Plus } from 'lucide-react';
+import { HelpCircle, Plus, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { exportDeviceHandlingStatus } from '../utils/excelExport';
 
 // Device types with their ratios (per the attachment)
 const DEVICE_TYPES = [
@@ -182,7 +183,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
   // Device Handling Activity state
   const [deviceActivities, setDeviceActivities] = useState(() => formData.deviceActivities || []);
   const [showActivityModal, setShowActivityModal] = useState(false);
-  const [activityForm, setActivityForm] = useState({ venueName: '', deviceType: '', action: 'send', quantity: 1, remarks: '' });
+  const [activityForm, setActivityForm] = useState({ venueName: '', deviceType: '', action: 'send', quantity: '', remarks: '', otgCable: 'no', reader: 'no' });
 
   // Selected date for Device Handling Status
   const [selectedStatusDate, setSelectedStatusDate] = useState(() => {
@@ -252,6 +253,130 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
     return list;
   }, [filterMapDeviceType, filterMapPartnerName, mapSearchQuery]);
 
+  // --- Universal Filters (apply across sections) ---
+  const [ufDistrict, setUfDistrict] = useState('');
+  const [ufCity, setUfCity] = useState('');
+  const [ufDeviceType, setUfDeviceType] = useState('');
+  const [ufPartner, setUfPartner] = useState('');
+
+  // Build venue metadata map from vendorMappings: venueName -> { city, district }
+  const venueMetaMap = useMemo(() => {
+    const map = {};
+    (formData.vendorMappings || []).forEach(vm => {
+      const partner = vm.partnerName || vm.partner || vm.vendorName || vm.vendor || '';
+      if (Array.isArray(vm.venues)) {
+        vm.venues.forEach(v => {
+          if (v && v.venueName) {
+            map[v.venueName] = { city: v.city || '', district: v.district || v.city || '', partner };
+          }
+        });
+      } else {
+        const venue = vm.venueName || vm.venue || vm.name;
+        if (venue) {
+          map[venue] = { city: vm.city || '', district: vm.district || vm.city || '', partner };
+        }
+      }
+    });
+    return map;
+  }, [formData.vendorMappings]);
+
+  const uniqueCities = useMemo(() => {
+    return Array.from(new Set(Object.values(venueMetaMap).map(m => m.city).filter(Boolean))).sort();
+  }, [venueMetaMap]);
+  const uniqueDistricts = useMemo(() => {
+    return Array.from(new Set(Object.values(venueMetaMap).map(m => m.district).filter(Boolean))).sort();
+  }, [venueMetaMap]);
+  const uniqueDeviceTypes = useMemo(() => DEVICE_TYPES.map(d => d.name), []);
+  const uniquePartners = useMemo(() => Array.from(new Set(Object.values(venueMetaMap).map(m => m.partner).filter(Boolean))).sort(), [venueMetaMap]);
+
+  // Map venue -> partner name (safe lookup) - defined early so filters can use it
+  const venueToPartner = useMemo(() => {
+    const map = {};
+    (formData.vendorMappings || []).forEach(vm => {
+      const partner = vm.partnerName || vm.partner || vm.vendorName || vm.vendor || '—';
+      if (Array.isArray(vm.venues)) {
+        vm.venues.forEach(v => {
+          if (v.venueName) map[v.venueName] = partner;
+        });
+      } else {
+        const venue = vm.venueName || vm.venue || vm.name;
+        if (venue) map[venue] = partner;
+      }
+    });
+    return map;
+  }, [formData.vendorMappings]);
+
+  // Get device mappings for the selected date (defined early so filters can reference it)
+  const adjustedDeviceMappings = useMemo(() => {
+    if (!selectedStatusDate) {
+      return deviceMappings;
+    }
+    return perDateDeviceMappings[selectedStatusDate] || deviceMappings;
+  }, [selectedStatusDate, perDateDeviceMappings, deviceMappings]);
+
+  // Apply universal filters to adjustedDeviceMappings (status) and perDateDeviceMappings (activity) and mappedDevicesList
+  const filteredAdjustedDeviceMappings = useMemo(() => {
+    const list = (adjustedDeviceMappings || []).filter(row => {
+      if (ufDeviceType && row.deviceType !== ufDeviceType) return false;
+      if (ufPartner) {
+        const partner = venueMetaMap[row.venueName]?.partner || '';
+        if (partner !== ufPartner) return false;
+      }
+      if (ufCity) {
+        const city = venueMetaMap[row.venueName]?.city || '';
+        if (city !== ufCity) return false;
+      }
+      if (ufDistrict) {
+        const district = venueMetaMap[row.venueName]?.district || '';
+        if (district !== ufDistrict) return false;
+      }
+      return true;
+    });
+    return list;
+  }, [adjustedDeviceMappings, ufCity, ufDistrict, ufDeviceType, ufPartner, venueMetaMap, venueToPartner]);
+
+  const filteredPerDateDeviceMappings = useMemo(() => {
+    const out = {};
+    Object.entries(perDateDeviceMappings || {}).forEach(([date, rows]) => {
+      out[date] = (rows || []).filter(row => {
+        if (ufDeviceType && row.deviceType !== ufDeviceType) return false;
+        if (ufPartner) {
+          const partner = venueMetaMap[row.venueName]?.partner || '';
+          if (partner !== ufPartner) return false;
+        }
+        if (ufCity) {
+          const city = venueMetaMap[row.venueName]?.city || '';
+          if (city !== ufCity) return false;
+        }
+        if (ufDistrict) {
+          const district = venueMetaMap[row.venueName]?.district || '';
+          if (district !== ufDistrict) return false;
+        }
+        return true;
+      });
+    });
+    return out;
+  }, [perDateDeviceMappings, ufCity, ufDistrict, ufDeviceType, ufPartner, venueMetaMap, venueToPartner]);
+
+  const filteredMappedDevicesList = useMemo(() => {
+    return (mappedDevicesList || []).filter(m => {
+      if (ufDeviceType && m.deviceType !== ufDeviceType) return false;
+      if (ufPartner && (m.partnerName || venueMetaMap[m.venueName]?.partner) !== ufPartner) return false;
+      if (ufCity && (venueMetaMap[m.venueName]?.city || '') !== ufCity) return false;
+      if (ufDistrict && (venueMetaMap[m.venueName]?.district || '') !== ufDistrict) return false;
+      return true;
+    });
+  }, [mappedDevicesList, ufCity, ufDistrict, ufDeviceType, ufPartner, venueMetaMap, venueToPartner]);
+
+  const groupedFilteredMappedByVenue = useMemo(() => {
+    const g = {};
+    (filteredMappedDevicesList || []).forEach((r, idx) => {
+      if (!g[r.venueName]) g[r.venueName] = [];
+      g[r.venueName].push({ ...r, index: idx });
+    });
+    return g;
+  }, [filteredMappedDevicesList]);
+
   // Re-initialize when venues or dates change
   useEffect(() => {
     if (mappedVenues.length > 0 && (!deviceMappings || deviceMappings.length === 0)) {
@@ -261,14 +386,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
     setPerDateDeviceMappings(initializePerDateDeviceData());
   }, [mappedVenues, formData.selectedDates]);
 
-  // Get device mappings for the selected date
-  const adjustedDeviceMappings = useMemo(() => {
-    if (!selectedStatusDate) {
-      return deviceMappings;
-    }
-    // Return the specific mappings for the selected date
-    return perDateDeviceMappings[selectedStatusDate] || deviceMappings;
-  }, [selectedStatusDate, perDateDeviceMappings, deviceMappings]);
+  
 
   // Calculate total for a device row
   const calculateTotal = (required, buffer) => required + buffer;
@@ -304,38 +422,82 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
   // Group data by venue for merged rows
   const groupedByVenue = useMemo(() => {
     const grouped = {};
-    adjustedDeviceMappings.forEach((row, idx) => {
+    (filteredAdjustedDeviceMappings || []).forEach((row, idx) => {
       if (!grouped[row.venueName]) {
         grouped[row.venueName] = [];
       }
       grouped[row.venueName].push({ ...row, index: idx });
     });
     return grouped;
-  }, [adjustedDeviceMappings]);
+  }, [filteredAdjustedDeviceMappings]);
 
-  // Map venue -> partner name (safe lookup)
-  const venueToPartner = useMemo(() => {
-    const map = {};
-    (formData.vendorMappings || []).forEach(vm => {
-      const partner = vm.partnerName || vm.partner || vm.vendorName || vm.vendor || '—';
-      // Support both old single-venue format and new multi-venue format
-      if (Array.isArray(vm.venues)) {
-        vm.venues.forEach(v => {
-          if (v.venueName) map[v.venueName] = partner;
-        });
-      } else {
-        const venue = vm.venueName || vm.venue || vm.name;
-        if (venue) map[venue] = partner;
+  
+
+  // Filter deviceActivities with universal filters
+  const filteredDeviceActivities = useMemo(() => {
+    return (deviceActivities || []).filter(activity => {
+      if (ufDeviceType && activity.deviceType !== ufDeviceType) return false;
+      if (ufPartner) {
+        const partner = activity.partnerName || venueToPartner[activity.venueName] || venueMetaMap[activity.venueName]?.partner;
+        if (partner !== ufPartner) return false;
       }
+      if (ufCity && (venueMetaMap[activity.venueName]?.city || '') !== ufCity) return false;
+      if (ufDistrict && (venueMetaMap[activity.venueName]?.district || '') !== ufDistrict) return false;
+      return true;
     });
-    return map;
-  }, [formData.vendorMappings]);
+  }, [deviceActivities, ufDeviceType, ufPartner, ufCity, ufDistrict, venueToPartner, venueMetaMap]);
 
   return (
     <div>
+      {/* Universal filter bar */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        <div style={{ minWidth: 160 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>District</label>
+          <select value={ufDistrict} onChange={e => setUfDistrict(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d1d5db' }}>
+            <option value="">All Districts</option>
+            {uniqueDistricts.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+
+        <div style={{ minWidth: 160 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>City</label>
+          <select value={ufCity} onChange={e => setUfCity(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d1d5db' }}>
+            <option value="">All Cities</option>
+            {uniqueCities.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div style={{ minWidth: 200 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Device Type</label>
+          <select value={ufDeviceType} onChange={e => setUfDeviceType(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d1d5db' }}>
+            <option value="">All Device Types</option>
+            {uniqueDeviceTypes.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+          </select>
+        </div>
+
+        <div style={{ minWidth: 200 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Partner (Device Provider)</label>
+          <select value={ufPartner} onChange={e => setUfPartner(e.target.value)} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #d1d5db' }}>
+            <option value="">All Partners</option>
+            {uniquePartners.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'end' }}>
+          <button onClick={() => { setUfDistrict(''); setUfCity(''); setUfDeviceType(''); setUfPartner(''); }} type="button" style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e5e7eb', background: 'white' }}>Clear Filters</button>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ marginTop: 0, marginBottom: 0 }}>Device Handling Status</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button 
+            onClick={() => exportDeviceHandlingStatus(filteredAdjustedDeviceMappings, 'device-handling-status.csv')} 
+            type="button" 
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'white', color: '#374151', border: '1px solid #e5e7eb', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+          >
+            <Download size={16} /> Export
+          </button>
           <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Select Date:</label>
           <select
             value={selectedStatusDate}
@@ -413,6 +575,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                         </div>
                       )}
                     </th>
+                    <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>Sent</th>
                     <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #e5e7eb' }}>Received</th>
                     <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>Variance</th>
                   </tr>
@@ -452,15 +615,16 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                               <input
                                 type="number"
                                 value={row.required}
-                                readOnly
+                                readOnly={!isEditingBuffers}
+                                onChange={e => handleChange(row.index, 'required', e.target.value)}
                                 style={{
                                   width: 50,
                                   padding: '4px 4px',
                                   borderRadius: 3,
                                   border: '1px solid #d1d5db',
-                                  background: '#f9fafb',
+                                  background: isEditingBuffers ? 'white' : '#f9fafb',
                                   textAlign: 'center',
-                                  cursor: 'not-allowed',
+                                  cursor: isEditingBuffers ? 'text' : 'not-allowed',
                                   fontSize: 12,
                                 }}
                               />
@@ -498,6 +662,22 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                                   cursor: 'not-allowed',
                                   fontSize: 12,
                                   fontWeight: 600,
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
+                              <input
+                                type="number"
+                                value={row.sent || 0}
+                                disabled
+                                style={{
+                                  width: 50,
+                                  padding: '4px 4px',
+                                  borderRadius: 3,
+                                  border: '1px solid #d1d5db',
+                                  textAlign: 'center',
+                                  fontSize: 12,
+                                  background: '#fafafa'
                                 }}
                               />
                             </td>
@@ -626,7 +806,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
         <h2 style={{ margin: 0 }}>Device Handling Activity</h2>
         <button
           onClick={() => {
-            setActivityForm({ venueName: mappedVenues[0] || '', deviceType: DEVICE_TYPES[0]?.name || '', action: 'send', quantity: 1, remarks: '' });
+            setActivityForm({ venueName: mappedVenues[0] || '', deviceType: DEVICE_TYPES[0]?.name || '', action: 'send', quantity: '', remarks: '', otgCable: 'no', reader: 'no' });
             setShowActivityModal(true);
           }}
           type="button"
@@ -649,8 +829,8 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
       </div>
 
       <div style={{ background: 'white', borderRadius: 8, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-        {deviceActivities.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>No device handling activities logged yet. Use <strong>Log Activity</strong> to record send/receive actions.</div>
+        {filteredDeviceActivities.length === 0 ? (
+          <div style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>No device handling activities match the selected filters. Use <strong>Log Activity</strong> to record send/receive actions.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
@@ -662,11 +842,13 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                   <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>Action</th>
                   <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>Quantity</th>
                   <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>Remarks</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>OTG Cable</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>Reader</th>
                   <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>Logged By</th>
                 </tr>
               </thead>
               <tbody>
-                {deviceActivities.map((activity, idx) => (
+                {filteredDeviceActivities.map((activity, idx) => (
                   <tr key={activity.id || idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '8px 6px', fontSize: 12 }}>{new Date(activity.timestamp).toLocaleString()}</td>
                     <td style={{ padding: '8px 6px', fontWeight: 600 }}>{activity.venueName}</td>
@@ -689,6 +871,12 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                     </td>
                     <td style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 600 }}>{activity.quantity}</td>
                     <td style={{ padding: '8px 6px', color: '#6b7280', fontSize: 12 }}>{activity.remarks || '—'}</td>
+                    <td style={{ padding: '8px 6px', textAlign: 'center', fontSize: 12 }}>
+                      {activity.deviceType === 'Biometric' ? (activity.otgCable === 'yes' ? '✓ Yes' : '✗ No') : '—'}
+                    </td>
+                    <td style={{ padding: '8px 6px', textAlign: 'center', fontSize: 12 }}>
+                      {activity.deviceType === 'Biometric' ? (activity.reader === 'yes' ? '✓ Yes' : '✗ No') : '—'}
+                    </td>
                     <td style={{ padding: '8px 6px', fontSize: 12 }}>{activity.loggedBy}</td>
                   </tr>
                 ))}
@@ -705,7 +893,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
         <div style={{ padding: 12, borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontWeight: 700 }}>Mapped Devices</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ fontSize: 13, color: '#6b7280' }}>{(mappedDevicesList && mappedDevicesList.length) ? `${mappedDevicesList.length} rows` : 'No mapped devices'}</div>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>{(filteredMappedDevicesList && filteredMappedDevicesList.length) ? `${filteredMappedDevicesList.length} rows` : 'No mapped devices'}</div>
             <button
               onClick={() => { setShowMapModal(true); setSelectedVenueForMapping(mappedVenues[0] || ''); }}
               type="button"
@@ -717,9 +905,9 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          {(!mappedDevicesList || mappedDevicesList.length === 0) ? (
+          {(!filteredMappedDevicesList || filteredMappedDevicesList.length === 0) ? (
             <div style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>
-              No devices mapped yet. Use <strong>Map Device</strong> to assign devices to venues.
+              No devices match the selected filters. Use <strong>Map Device</strong> to assign devices to venues.
             </div>
           ) : (
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
@@ -735,7 +923,7 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(groupedMappedByVenue).map(([venueName, rows]) => (
+                {Object.entries(groupedFilteredMappedByVenue).map(([venueName, rows]) => (
                   rows.map((row, i) => (
                     <tr key={row.deviceId} style={{ borderBottom: '1px solid #f3f4f6' }}>
                       {i === 0 && (
@@ -892,8 +1080,9 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                 <input
                   type="number"
                   min="1"
-                  value={activityForm.quantity}
-                  onChange={(e) => setActivityForm({ ...activityForm, quantity: parseInt(e.target.value) || 1 })}
+                  placeholder="Enter device quantity"
+                  value={activityForm.quantity || ''}
+                  onChange={(e) => setActivityForm({ ...activityForm, quantity: e.target.value ? parseInt(e.target.value) : '' })}
                   style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #d1d5db' }}
                 />
               </div>
@@ -908,6 +1097,62 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                   style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #d1d5db', resize: 'vertical' }}
                 />
               </div>
+
+              {activityForm.deviceType === 'Biometric' && (
+                <>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>OTG Cable Sent?</label>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="otgCable"
+                          value="yes"
+                          checked={activityForm.otgCable === 'yes'}
+                          onChange={(e) => setActivityForm({ ...activityForm, otgCable: e.target.value })}
+                        />
+                        <span>Yes</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="otgCable"
+                          value="no"
+                          checked={activityForm.otgCable === 'no'}
+                          onChange={(e) => setActivityForm({ ...activityForm, otgCable: e.target.value })}
+                        />
+                        <span>No</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Fingerprint Reader Sent?</label>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="reader"
+                          value="yes"
+                          checked={activityForm.reader === 'yes'}
+                          onChange={(e) => setActivityForm({ ...activityForm, reader: e.target.value })}
+                        />
+                        <span>Yes</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="reader"
+                          value="no"
+                          checked={activityForm.reader === 'no'}
+                          onChange={(e) => setActivityForm({ ...activityForm, reader: e.target.value })}
+                        />
+                        <span>No</span>
+                      </label>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
@@ -927,24 +1172,88 @@ const Step4_DeviceVenue = ({ formData, setFormData }) => {
                     remarks: activityForm.remarks,
                     timestamp: new Date().toISOString(),
                     loggedBy: user?.fullName || 'Unknown',
+                    ...(activityForm.deviceType === 'Biometric' && {
+                      otgCable: activityForm.otgCable,
+                      reader: activityForm.reader,
+                    }),
                   };
 
                   const updated = [newActivity, ...deviceActivities];
                   setDeviceActivities(updated);
 
-                  // Update received counts in deviceMappings
-                  if (activityForm.action === 'receive') {
-                    const updatedMappings = deviceMappings.map(dm => {
+                  // Determine if this device type is lab-wise (Body Cam, CCTV Kit)
+                  const labDevices = ['Body Cam', 'CCTV Kit'];
+                  const isLabWise = labDevices.includes(activityForm.deviceType);
+
+                  // Update sent/received counts in deviceMappings
+                  const updatedMappings = deviceMappings.map(dm => {
+                    if (dm.venueName === activityForm.venueName && dm.deviceType === activityForm.deviceType) {
+                      if (isLabWise) {
+                        // For lab-wise devices, find all labs for this venue+device and distribute
+                        const labRows = deviceMappings.filter(
+                          d => d.venueName === activityForm.venueName && d.deviceType === activityForm.deviceType && (d.locationType === 'Lab-1' || d.locationType === 'Lab-2')
+                        );
+                        const numLabs = labRows.length || 1;
+                        const baseQty = Math.floor(activityForm.quantity / numLabs);
+                        const remainder = activityForm.quantity % numLabs;
+                        
+                        // Distribute: give remainder items to earlier labs (Lab-1, Lab-2, etc.)
+                        const labIndex = (dm.locationType === 'Lab-1' ? 0 : dm.locationType === 'Lab-2' ? 1 : 2);
+                        const qty = baseQty + (labIndex < remainder ? 1 : 0);
+                        
+                        if (activityForm.action === 'send') {
+                          return { ...dm, sent: (dm.sent || 0) + qty };
+                        } else {
+                          return { ...dm, received: (dm.received || 0) + qty };
+                        }
+                      } else {
+                        // For non-lab-wise devices, add entire quantity
+                        if (activityForm.action === 'send') {
+                          return { ...dm, sent: (dm.sent || 0) + activityForm.quantity };
+                        } else {
+                          return { ...dm, received: (dm.received || 0) + activityForm.quantity };
+                        }
+                      }
+                    }
+                    return dm;
+                  });
+                  setDeviceMappings(updatedMappings);
+
+                  // Also update per-date device mappings if a date is selected
+                  const updatedPerDateMappings = { ...perDateDeviceMappings };
+                  if (selectedStatusDate && updatedPerDateMappings[selectedStatusDate]) {
+                    updatedPerDateMappings[selectedStatusDate] = updatedPerDateMappings[selectedStatusDate].map(dm => {
                       if (dm.venueName === activityForm.venueName && dm.deviceType === activityForm.deviceType) {
-                        return { ...dm, received: (dm.received || 0) + activityForm.quantity };
+                        if (isLabWise) {
+                          // Same distribution logic for per-date mappings
+                          const labRows = (updatedPerDateMappings[selectedStatusDate] || []).filter(
+                            d => d.venueName === activityForm.venueName && d.deviceType === activityForm.deviceType && (d.locationType === 'Lab-1' || d.locationType === 'Lab-2')
+                          );
+                          const numLabs = labRows.length || 1;
+                          const baseQty = Math.floor(activityForm.quantity / numLabs);
+                          const remainder = activityForm.quantity % numLabs;
+                          const labIndex = (dm.locationType === 'Lab-1' ? 0 : dm.locationType === 'Lab-2' ? 1 : 2);
+                          const qty = baseQty + (labIndex < remainder ? 1 : 0);
+                          
+                          if (activityForm.action === 'send') {
+                            return { ...dm, sent: (dm.sent || 0) + qty };
+                          } else {
+                            return { ...dm, received: (dm.received || 0) + qty };
+                          }
+                        } else {
+                          if (activityForm.action === 'send') {
+                            return { ...dm, sent: (dm.sent || 0) + activityForm.quantity };
+                          } else {
+                            return { ...dm, received: (dm.received || 0) + activityForm.quantity };
+                          }
+                        }
                       }
                       return dm;
                     });
-                    setDeviceMappings(updatedMappings);
-                    setFormData({ ...formData, deviceActivities: updated, deviceMappings: updatedMappings });
-                  } else {
-                    setFormData({ ...formData, deviceActivities: updated });
+                    setPerDateDeviceMappings(updatedPerDateMappings);
                   }
+
+                  setFormData({ ...formData, deviceActivities: updated, deviceMappings: updatedMappings, perDateDeviceMappings: updatedPerDateMappings });
 
                   setShowActivityModal(false);
                   alert(`Activity logged: ${activityForm.action === 'send' ? 'Sent' : 'Received'} ${activityForm.quantity} ${activityForm.deviceType} ${activityForm.action === 'send' ? 'to' : 'from'} ${activityForm.venueName}`);

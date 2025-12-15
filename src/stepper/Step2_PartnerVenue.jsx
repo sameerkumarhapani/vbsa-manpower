@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Filter, Edit2 } from 'lucide-react';
+import { Plus, Filter, Edit2, Download } from 'lucide-react';
+import { exportPartnerMappings } from '../utils/excelExport';
 
 // Mock partners from vendor management with contact details
 const ALL_PARTNERS = [
@@ -33,7 +34,7 @@ const ALL_VENUES = [
   { id: 'v-kolhapur-002', name: 'Kolhapur Engineering Centre', city: 'Kolhapur', lat: 16.7084, lng: 74.2254 },
 ];
 
-const Step2_PartnerVenue = ({ formData, setFormData }) => {
+const Step2_PartnerVenue = ({ formData, setFormData, parentPartnerIds = [] }) => {
   const [showModal, setShowModal] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState('');
   const [selectedVenues, setSelectedVenues] = useState([]); // multi-select venues
@@ -42,12 +43,20 @@ const Step2_PartnerVenue = ({ formData, setFormData }) => {
   const [filterPartnerType, setFilterPartnerType] = useState('');
   const [editingIdx, setEditingIdx] = useState(null);
 
+  // Filter partners: only show those mapped to parent project
+  const filteredPartners = useMemo(() => {
+    if (parentPartnerIds.length === 0) {
+      return ALL_PARTNERS; // Show all if no parent project or no mappings
+    }
+    return ALL_PARTNERS.filter(p => parentPartnerIds.includes(p.id));
+  }, [parentPartnerIds]);
+
   // Get unique partner types for filter dropdown
   const uniquePartnerTypes = useMemo(() => {
     const types = new Set();
-    ALL_PARTNERS.forEach(p => p.vendorTypes.forEach(t => types.add(t)));
+    filteredPartners.forEach(p => p.vendorTypes.forEach(t => types.add(t)));
     return Array.from(types).sort();
-  }, []);
+  }, [filteredPartners]);
 
   // Get unique venues for filter dropdown
   const uniqueVenues = useMemo(() => {
@@ -66,7 +75,7 @@ const Step2_PartnerVenue = ({ formData, setFormData }) => {
   const handleAddMapping = () => {
     if (!selectedPartner || selectedVenues.length === 0) return;
     
-    const partner = ALL_PARTNERS.find(p => p.id === selectedPartner);
+    const partner = filteredPartners.find(p => p.id === selectedPartner);
     if (!partner) return;
 
     // Build venues array from selected venue IDs
@@ -131,6 +140,9 @@ const Step2_PartnerVenue = ({ formData, setFormData }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ fontSize: 14, color: '#6b7280' }}>{filteredMappings.length} mapping(s)</div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => exportPartnerMappings(filteredMappings, 'partner-venue-mapping.csv')} type="button" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'white', color: '#374151', border: '1px solid #e5e7eb', cursor: 'pointer' }}>
+            <Download size={16} /> Export
+          </button>
           <button onClick={() => setShowFilterModal(true)} type="button" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'white', color: '#374151', border: '1px solid #e5e7eb', cursor: 'pointer' }}>
             <Filter size={16} /> Filter
           </button>
@@ -211,7 +223,7 @@ const Step2_PartnerVenue = ({ formData, setFormData }) => {
               <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Select Partner *</label>
               <select value={selectedPartner} onChange={e => setSelectedPartner(e.target.value)} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}>
                 <option value="">Choose a partner</option>
-                {ALL_PARTNERS.map(p => (
+                {filteredPartners.map(p => (
                   <option key={p.id} value={p.id}>{p.name} ({p.vendorTypes[0]})</option>
                 ))}
               </select>

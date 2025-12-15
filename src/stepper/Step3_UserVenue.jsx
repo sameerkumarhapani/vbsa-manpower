@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Filter, Edit2 } from 'lucide-react';
+import { Plus, Filter, Edit2, Search, X, Download } from 'lucide-react';
+import { exportUserMappings } from '../utils/excelExport';
 
 // Mock partners from vendor management with contact details
 const ALL_PARTNERS = [
@@ -51,18 +52,18 @@ const ALL_USERS = [
 
 // Mock venues - colleges in Maharashtra
 const ALL_VENUES = [
-  { id: 'v-mum-001', name: 'Mumbai University Exam Centre', city: 'Mumbai', lat: 19.184926, lng: 72.833073 },
-  { id: 'v-mum-002', name: 'IIT Bombay Campus', city: 'Mumbai', lat: 19.1136, lng: 72.9108 },
-  { id: 'v-pune-001', name: 'Savitribai Phule Pune University', city: 'Pune', lat: 18.5204, lng: 73.8567 },
-  { id: 'v-pune-002', name: 'COEP Technological University', city: 'Pune', lat: 18.5309, lng: 73.8234 },
-  { id: 'v-nag-001', name: 'Nagpur University Exam Hall', city: 'Nagpur', lat: 21.1458, lng: 79.0882 },
-  { id: 'v-nag-002', name: 'VNIT Nagpur', city: 'Nagpur', lat: 21.1881, lng: 79.0912 },
-  { id: 'v-aurang-001', name: 'Dr. Babasaheb Ambedkar University', city: 'Aurangabad', lat: 19.8762, lng: 75.3433 },
-  { id: 'v-aurang-002', name: 'Aurangabad College', city: 'Aurangabad', lat: 19.8878, lng: 75.3591 },
-  { id: 'v-nashik-001', name: 'Nashik University Centre', city: 'Nashik', lat: 19.9975, lng: 73.7898 },
-  { id: 'v-nashik-002', name: 'KKHA Exam Centre', city: 'Nashik', lat: 19.9989, lng: 73.8234 },
-  { id: 'v-kolhapur-001', name: 'Shivaji University', city: 'Kolhapur', lat: 16.7050, lng: 74.2432 },
-  { id: 'v-kolhapur-002', name: 'Kolhapur Engineering Centre', city: 'Kolhapur', lat: 16.7084, lng: 74.2254 },
+  { id: 'v-mum-001', code: 'MUM001', name: 'Mumbai University Exam Centre', city: 'Mumbai', district: 'Mumbai', lat: 19.184926, lng: 72.833073 },
+  { id: 'v-mum-002', code: 'MUM002', name: 'IIT Bombay Campus', city: 'Mumbai', district: 'Mumbai', lat: 19.1136, lng: 72.9108 },
+  { id: 'v-pune-001', code: 'PUN001', name: 'Savitribai Phule Pune University', city: 'Pune', district: 'Pune', lat: 18.5204, lng: 73.8567 },
+  { id: 'v-pune-002', code: 'PUN002', name: 'COEP Technological University', city: 'Pune', district: 'Pune', lat: 18.5309, lng: 73.8234 },
+  { id: 'v-nag-001', code: 'NAG001', name: 'Nagpur University Exam Hall', city: 'Nagpur', district: 'Nagpur', lat: 21.1458, lng: 79.0882 },
+  { id: 'v-nag-002', code: 'NAG002', name: 'VNIT Nagpur', city: 'Nagpur', district: 'Nagpur', lat: 21.1881, lng: 79.0912 },
+  { id: 'v-aurang-001', code: 'AUR001', name: 'Dr. Babasaheb Ambedkar University', city: 'Aurangabad', district: 'Aurangabad', lat: 19.8762, lng: 75.3433 },
+  { id: 'v-aurang-002', code: 'AUR002', name: 'Aurangabad College', city: 'Aurangabad', district: 'Aurangabad', lat: 19.8878, lng: 75.3591 },
+  { id: 'v-nashik-001', code: 'NAS001', name: 'Nashik University Centre', city: 'Nashik', district: 'Nashik', lat: 19.9975, lng: 73.7898 },
+  { id: 'v-nashik-002', code: 'NAS002', name: 'KKHA Exam Centre', city: 'Nashik', district: 'Nashik', lat: 19.9989, lng: 73.8234 },
+  { id: 'v-kolhapur-001', code: 'KOL001', name: 'Shivaji University', city: 'Kolhapur', district: 'Kolhapur', lat: 16.7050, lng: 74.2432 },
+  { id: 'v-kolhapur-002', code: 'KOL002', name: 'Kolhapur Engineering Centre', city: 'Kolhapur', district: 'Kolhapur', lat: 16.7084, lng: 74.2254 },
 ];
 
 const Step3_UserVenue = ({ formData, setFormData }) => {
@@ -75,6 +76,12 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
   const [filterPartner, setFilterPartner] = useState('');
   const [filterUserRole, setFilterUserRole] = useState('');
   const [editingIdx, setEditingIdx] = useState(null);
+  // New states for user search and venue filters
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [venueSearchQuery, setVenueSearchQuery] = useState('');
+  const [filterDistrict, setFilterDistrict] = useState('');
+  const [filterCity, setFilterCity] = useState('');
 
   // Get unique user roles for filter dropdown
   const uniqueUserRoles = useMemo(() => {
@@ -93,28 +100,70 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
     return ALL_PARTNERS.map(p => p.name).sort();
   }, []);
 
+  // Get unique districts for venue filters
+  const uniqueDistricts = useMemo(() => {
+    const districts = new Set();
+    ALL_VENUES.forEach(v => districts.add(v.district));
+    return Array.from(districts).sort();
+  }, []);
+
+  // Get unique cities for venue filters
+  const uniqueCities = useMemo(() => {
+    const cities = new Set();
+    ALL_VENUES.forEach(v => cities.add(v.city));
+    return Array.from(cities).sort();
+  }, []);
+
   // Get users filtered by selected partner
   const filteredUsersByPartner = useMemo(() => {
     if (!selectedPartner) return [];
     const partner = ALL_PARTNERS.find(p => p.id === selectedPartner);
     if (!partner) return [];
-    return ALL_USERS.filter(u => u.vendorName === partner.name);
-  }, [selectedPartner]);
+    // Only match on user's full name (case-insensitive, partial)
+    let users = ALL_USERS.filter(u => u.vendorName === partner.name);
+    if (userSearchQuery.trim()) {
+      const query = userSearchQuery.toLowerCase();
+      users = users.filter(u => u.fullName.toLowerCase().includes(query));
+    }
+    return users;
+  }, [selectedPartner, userSearchQuery]);
 
-  // Get venues associated with selected partner from Step 2 mappings
+  // Get venues associated with selected partner from Step 2 mappings, filtered by search/district/city
   const filteredVenuesByPartner = useMemo(() => {
     if (!selectedPartner) return [];
     const partnerMapping = (formData.vendorMappings || []).find(m => m.partnerId === selectedPartner);
     if (!partnerMapping) return [];
-    // Support both old single-venue and new multi-venue format
+    
+    // Get venues from partner mapping
+    let venues = [];
     if (Array.isArray(partnerMapping.venues)) {
-      return partnerMapping.venues.map(v => ALL_VENUES.find(venue => venue.id === v.venueId)).filter(Boolean);
+      venues = partnerMapping.venues.map(v => ALL_VENUES.find(venue => venue.id === v.venueId)).filter(Boolean);
     } else if (partnerMapping.venueId) {
       const venue = ALL_VENUES.find(v => v.id === partnerMapping.venueId);
-      return venue ? [venue] : [];
+      venues = venue ? [venue] : [];
     }
-    return [];
-  }, [selectedPartner, formData.vendorMappings]);
+
+    // Apply search filter
+    if (venueSearchQuery.trim()) {
+      const query = venueSearchQuery.toLowerCase();
+      venues = venues.filter(v => 
+        v.name.toLowerCase().includes(query) ||
+        v.code.toLowerCase().includes(query)
+      );
+    }
+
+    // Apply district filter
+    if (filterDistrict) {
+      venues = venues.filter(v => v.district === filterDistrict);
+    }
+
+    // Apply city filter
+    if (filterCity) {
+      venues = venues.filter(v => v.city === filterCity);
+    }
+
+    return venues;
+  }, [selectedPartner, formData.vendorMappings, venueSearchQuery, filterDistrict, filterCity]);
 
   // Filter mappings based on selected filters
   const filteredMappings = useMemo(() => {
@@ -201,6 +250,9 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ fontSize: 14, color: '#6b7280' }}>{filteredMappings.length} mapping(s)</div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => exportUserMappings(filteredMappings, 'user-venue-mapping.csv')} type="button" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'white', color: '#374151', border: '1px solid #e5e7eb', cursor: 'pointer' }}>
+            <Download size={16} /> Export
+          </button>
           <button onClick={() => setShowFilterModal(true)} type="button" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'white', color: '#374151', border: '1px solid #e5e7eb', cursor: 'pointer' }}>
             <Filter size={16} /> Filter
           </button>
@@ -243,11 +295,14 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
                     </td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {venueList.map((v, vi) => (
-                          <span key={vi} style={{ display: 'inline-block', padding: '4px 8px', borderRadius: 6, fontSize: 12, background: '#eef2ff', color: '#374151' }}>
-                            {v.venueName}
-                          </span>
-                        ))}
+                        {venueList.map((v, vi) => {
+                          const venueObj = ALL_VENUES.find(venue => venue.venueName === v.venueName);
+                          return (
+                            <span key={vi} style={{ display: 'inline-block', padding: '4px 8px', borderRadius: 6, fontSize: 12, background: '#eef2ff', color: '#374151' }}>
+                              {venueObj?.code ? `${venueObj.code} - ` : ''}{v.venueName}
+                            </span>
+                          );
+                        })}
                       </div>
                     </td>
                     <td><strong>{m.partnerName}</strong></td>
@@ -274,7 +329,7 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
       </div>
 
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }} onClick={() => setShowModal(false)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }} onClick={() => { setShowModal(false); setUserDropdownOpen(false); }}>
           <div style={{ width: 420, maxWidth: '95%', background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>{editingIdx !== null ? 'Edit Mapping' : 'Map User to Venue'}</div>
@@ -283,22 +338,73 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Select Partner *</label>
-              <select value={selectedPartner} onChange={e => { setSelectedPartner(e.target.value); setSelectedUser(''); setSelectedVenues([]); }} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}>
+              <select value={selectedPartner} onChange={e => { setSelectedPartner(e.target.value); setSelectedUser(''); setSelectedVenues([]); setUserSearchQuery(''); setVenueSearchQuery(''); setFilterDistrict(''); setFilterCity(''); setUserDropdownOpen(false); }} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}>
                 <option value="">Choose a partner</option>
                 {ALL_PARTNERS.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             </div>
-
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Select User *</label>
-              <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} disabled={!selectedPartner} style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #d1d5db', opacity: !selectedPartner ? 0.5 : 1, cursor: !selectedPartner ? 'not-allowed' : 'pointer' }}>
-                <option value="">Choose a user</option>
-                {filteredUsersByPartner.map(u => (
-                  <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>
-                ))}
-              </select>
+              <div style={{ position: 'relative' }}>
+                <div
+                  onClick={() => { if (selectedPartner) setUserDropdownOpen(v => !v); }}
+                  role="button"
+                  tabIndex={0}
+                  style={{
+                    width: '100%',
+                    padding: 10,
+                    borderRadius: 8,
+                    border: '1px solid #d1d5db',
+                    background: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: selectedPartner ? 'pointer' : 'not-allowed',
+                    opacity: selectedPartner ? 1 : 0.6
+                  }}
+                >
+                  <div style={{ color: selectedUser ? '#111827' : '#6b7280' }}>
+                    {selectedUser ? `${ALL_USERS.find(u => u.id === selectedUser)?.fullName} (${ALL_USERS.find(u => u.id === selectedUser)?.role})` : `Choose a user ${filteredUsersByPartner.length > 0 ? `(${filteredUsersByPartner.length} found)` : ''}`}
+                  </div>
+                  <div style={{ marginLeft: 8, color: '#6b7280' }}>{userDropdownOpen ? '▴' : '▾'}</div>
+                </div>
+
+                {userDropdownOpen && (
+                  <div style={{ position: 'absolute', left: 0, right: 0, marginTop: 8, zIndex: 1400 }} onClick={e => e.stopPropagation()}>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, background: 'white', padding: 8, boxShadow: '0 12px 30px rgba(0,0,0,0.08)' }}>
+                      <div style={{ position: 'relative', marginBottom: 8 }}>
+                        <Search size={16} style={{ position: 'absolute', left: 10, top: 10, color: '#6b7280' }} />
+                        <input
+                          value={userSearchQuery}
+                          onChange={e => setUserSearchQuery(e.target.value)}
+                          placeholder="Search by name, email, mobile, or ID"
+                          style={{ width: '100%', padding: '8px 10px 8px 36px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                        />
+                        {userSearchQuery && (
+                          <button onClick={() => setUserSearchQuery('')} style={{ position: 'absolute', right: 8, top: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280' }}>
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                        {filteredUsersByPartner.length === 0 ? (
+                          <div style={{ padding: 8, color: '#6b7280' }}>No users match your search</div>
+                        ) : (
+                          filteredUsersByPartner.map(u => (
+                            <div key={u.id} onClick={() => { setSelectedUser(u.id); setUserDropdownOpen(false); }} style={{ padding: 8, borderRadius: 6, cursor: 'pointer', background: selectedUser === u.id ? '#eef2ff' : 'transparent' }}>
+                              <div style={{ fontSize: 13, fontWeight: 600 }}>{u.fullName}</div>
+                              <div style={{ fontSize: 12, color: '#6b7280' }}>{u.role} • {u.userId} • {u.mobile}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ marginBottom: 16 }}>
@@ -307,24 +413,98 @@ const Step3_UserVenue = ({ formData, setFormData }) => {
                 <div style={{ padding: 16, textAlign: 'center', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 8, background: '#f9fafb' }}>
                   Please select a partner first to see available venues
                 </div>
-              ) : filteredVenuesByPartner.length === 0 ? (
+              ) : filteredVenuesByPartner.length === 0 && !venueSearchQuery && !filterDistrict && !filterCity ? (
                 <div style={{ padding: 16, textAlign: 'center', color: '#ef4444', border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2' }}>
                   No venues mapped for this partner. Please map venues in Step 2 first.
                 </div>
               ) : (
                 <>
+                  {/* Venue Search Bar */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Search size={16} style={{ position: 'absolute', left: 10, color: '#6b7280' }} />
+                      <input
+                        type="text"
+                        placeholder="Search venues by name or code (e.g., MUM001)"
+                        value={venueSearchQuery}
+                        onChange={e => setVenueSearchQuery(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 10px 10px 36px',
+                          borderRadius: 8,
+                          border: '1px solid #d1d5db',
+                          fontSize: 13
+                        }}
+                      />
+                      {venueSearchQuery && (
+                        <button
+                          onClick={() => setVenueSearchQuery('')}
+                          style={{
+                            position: 'absolute',
+                            right: 10,
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#6b7280',
+                            padding: 0
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* District and City Filters */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>District</label>
+                      <select
+                        value={filterDistrict}
+                        onChange={e => setFilterDistrict(e.target.value)}
+                        style={{ width: '100%', padding: '8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 12 }}
+                      >
+                        <option value="">All</option>
+                        {uniqueDistricts.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>City</label>
+                      <select
+                        value={filterCity}
+                        onChange={e => setFilterCity(e.target.value)}
+                        style={{ width: '100%', padding: '8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 12 }}
+                      >
+                        <option value="">All</option>
+                        {uniqueCities.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <button type="button" onClick={selectAllVenues} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: 'white', fontSize: 12 }}>Select All</button>
                     <button type="button" onClick={clearAllVenues} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: 'white', fontSize: 12 }}>Clear All</button>
                   </div>
                   <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
-                    {filteredVenuesByPartner.map(v => (
-                      <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, cursor: 'pointer', background: selectedVenues.includes(v.id) ? '#eef2ff' : 'transparent' }}>
-                        <input type="checkbox" checked={selectedVenues.includes(v.id)} onChange={() => toggleVenue(v.id)} />
-                        <span style={{ flex: 1 }}>{v.name}</span>
-                        <span style={{ fontSize: 12, color: '#6b7280' }}>({v.city})</span>
-                      </label>
-                    ))}
+                    {filteredVenuesByPartner.length === 0 ? (
+                      <div style={{ padding: 12, textAlign: 'center', color: '#6b7280', fontSize: 12 }}>
+                        No venues match your filters
+                      </div>
+                    ) : (
+                      filteredVenuesByPartner.map(v => (
+                        <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px', borderRadius: 6, cursor: 'pointer', background: selectedVenues.includes(v.id) ? '#eef2ff' : 'transparent' }}>
+                          <input type="checkbox" checked={selectedVenues.includes(v.id)} onChange={() => toggleVenue(v.id)} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{v.code} - {v.name}</div>
+                            <div style={{ fontSize: 11, color: '#6b7280' }}>{v.city}, {v.district}</div>
+                          </div>
+                        </label>
+                      ))
+                    )}
                   </div>
                 </>
               )}

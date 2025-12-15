@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { exportSessionAttendance } from '../utils/excelExport';
 
 // Small self-contained Step5: User Attendance & Device Issuance
 // - Section 1: Users table with Mark Attendance button
@@ -922,6 +923,13 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
 
                     return (
                       <>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); exportSessionAttendance(s.label || `Session-${sidx + 1}`, recordsBySession[s.id] || [], s.id); }} 
+                          title="Export attendance data for this session as CSV"
+                          style={{ padding: '6px 10px', borderRadius: 8, background: 'white', border: '1px solid #e5e7eb', color: '#374151', cursor: 'pointer', fontWeight: 600, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          📥 Export
+                        </button>
                         {existingChecklist1 ? (
                           <button
                             onClick={(e) => { e.stopPropagation(); /* show details maybe */ setActiveChecklistTab('checklist1'); openChecklistModal(s); }}

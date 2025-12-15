@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import './LoginPage.css';
@@ -24,6 +24,13 @@ const LoginPage = () => {
     { value: 'bodycampm', label: 'Body Cam Partner PM' },
     { value: 'manpowerpm', label: 'Manpower Partner PM' },
   ];
+
+  // Pre-fill credentials on component mount
+  useEffect(() => {
+    const { username: u, password: p } = getCredentials('superadmin');
+    setUsername(u);
+    setPassword(p);
+  }, [getCredentials]);
 
   const handleRoleChange = (role) => {
     setSelectedRole(role);

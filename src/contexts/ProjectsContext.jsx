@@ -180,7 +180,16 @@ export const ProjectsProvider = ({ children }) => {
 
   const addProject = useCallback((data) => {
     const id = `proj_${Date.now()}`;
-    const proj = { id, name: data.name, label: data.label, startDate: data.startDate, endDate: data.endDate, status: data.status || 'Planning', createdAt: new Date().toISOString() };
+    const proj = { 
+      id, 
+      name: data.name, 
+      label: data.label, 
+      startDate: data.startDate, 
+      endDate: data.endDate, 
+      status: data.status || 'Planning',
+      partnerMappings: data.partnerMappings || [],
+      createdAt: new Date().toISOString() 
+    };
     setProjects(prev => [proj, ...prev]);
     return id;
   }, []);

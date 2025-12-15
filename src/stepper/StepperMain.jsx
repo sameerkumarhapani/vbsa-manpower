@@ -9,7 +9,11 @@ import { FileText, Handshake, Users, Smartphone, ClipboardCheck } from 'lucide-r
 
 const StepperMain = ({ onBack }) => {
   const [step, setStep] = useState(1);
-  const { addSubproject, selectedProjectId } = useProjects();
+  const { addSubproject, selectedProjectId, projects } = useProjects();
+  
+  // Get parent project to access its partner mappings
+  const parentProject = projects.find(p => p.id === selectedProjectId);
+  const parentPartnerMappings = parentProject?.partnerMappings || [];
 
   const [formData, setFormData] = useState({
     name: '',
@@ -125,7 +129,7 @@ const StepperMain = ({ onBack }) => {
       <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ padding: 20 }}>
           {step === 1 && <Step1_ProjectDetails formData={formData} setFormData={setFormData} />}
-          {step === 2 && <Step2_PartnerVenue formData={formData} setFormData={setFormData} />}
+          {step === 2 && <Step2_PartnerVenue formData={formData} setFormData={setFormData} parentPartnerIds={parentPartnerMappings} />}
           {step === 3 && <Step3_UserVenue formData={formData} setFormData={setFormData} />}
           {step === 4 && <Step4_DeviceVenue formData={formData} setFormData={setFormData} />}
           {step === 5 && <Step5_UserAttendance formData={formData} setFormData={setFormData} />}
