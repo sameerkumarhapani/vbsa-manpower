@@ -13,8 +13,7 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const roles = [
-    { value: 'superadmin', label: 'Super Admin' },
-    { value: 'projectmanager', label: 'Project Manager' },
+    { value: 'superadmin', label: 'Project Manager' },
     { value: 'servermanager', label: 'Server Manager' },
     { value: 'centermanager', label: 'Center Manager' },
     { value: 'venuepm', label: 'Venue Partner PM' },

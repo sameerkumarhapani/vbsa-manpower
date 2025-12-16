@@ -19,7 +19,7 @@ const ROLE_HIERARCHY = {
 const MOCK_USERS = {
   superadmin: {
     id: 'sa-001',
-    username: 'superadmin',
+    username: 'projectmanager',
     email: 'admin@vbsa.com',
     password: 'superadmin123',
     role: 'Super Admin',
