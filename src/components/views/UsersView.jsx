@@ -7,6 +7,60 @@ const UsersView = () => {
   const { getVisibleUsers, user, users, syncUserStatusesWithVendors, addUsers, vendors } = useAuth();
   const allUsers = useMemo(() => getVisibleUsers(), [getVisibleUsers, users]);
   
+  // Get emergency onboarding config
+  const { emergencyOnboardingConfig } = useConfig();
+  
+  // Dummy emergency users for demonstration
+  const dummyEmergencyUsers = useMemo(() => [
+    {
+      id: 'emer-1',
+      userId: 'EMR-001',
+      fullName: 'Rajesh Kumar (Emergency)',
+      role: 'CCTV Technician',
+      vendorName: 'Tech Solutions Inc',
+      mobile: '9876543210',
+      mobileVerified: false,
+      faceRegistered: false,
+      status: 'Active',
+      isEmergency: true,
+      emergencyCreatedAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), // Created 5 hours ago
+      emergencyExpiresAt: new Date(Date.now() + (emergencyOnboardingConfig.accountValidityHours - 5) * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'emer-2',
+      userId: 'EMR-002',
+      fullName: 'Priya Sharma (Emergency)',
+      role: 'Biometric Operator',
+      vendorName: 'BioMetrics India',
+      mobile: '9876543211',
+      mobileVerified: false,
+      faceRegistered: false,
+      status: 'Active',
+      isEmergency: true,
+      emergencyCreatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // Created 2 hours ago
+      emergencyExpiresAt: new Date(Date.now() + (emergencyOnboardingConfig.accountValidityHours - 2) * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'emer-3',
+      userId: 'EMR-003',
+      fullName: 'Amit Patel (Emergency)',
+      role: 'Network Administrator',
+      vendorName: 'Network Services Ltd',
+      mobile: '9876543212',
+      mobileVerified: false,
+      faceRegistered: false,
+      status: 'Active',
+      isEmergency: true,
+      emergencyCreatedAt: new Date(Date.now() - 22 * 60 * 60 * 1000).toISOString(), // Created 22 hours ago
+      emergencyExpiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() // Expires in 2 hours
+    }
+  ], [emergencyOnboardingConfig.accountValidityHours]);
+  
+  // Combine regular users with emergency users
+  const combinedUsers = useMemo(() => {
+    return [...allUsers, ...dummyEmergencyUsers];
+  }, [allUsers, dummyEmergencyUsers]);
+  
   // Sync user statuses with vendor statuses on mount
   useEffect(() => {
     syncUserStatusesWithVendors();
@@ -38,6 +92,9 @@ const UsersView = () => {
   const [bulkUploadSuccess, setBulkUploadSuccess] = useState('');
   const fileInputRef = useRef(null);
   
+  // State to trigger re-render for countdown timers
+  const [, setTimerTick] = useState(0);
+  
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -62,6 +119,15 @@ const UsersView = () => {
     aadharNo: '',
     pinCode: '',
   });
+  
+  // Update countdown timers every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimerTick(prev => prev + 1);
+    }, 60000); // Update every minute
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Get unique roles and vendors from users
   const uniqueRoles = useMemo(() => {
@@ -76,18 +142,23 @@ const UsersView = () => {
 
   const statuses = ['Active', 'Inactive'];
 
-  // Dynamic roles from configuration context merged with any existing user roles not present
-  const { manpowerRoles } = useConfig();
-  const configuredRoleNames = useMemo(() => manpowerRoles.map(r => r.name), [manpowerRoles]);
+  // Get configured user roles from ConfigContext
+  const { userRoles: configuredUserRoles } = useConfig();
+  const configuredRoleNames = useMemo(() => 
+    configuredUserRoles.map(r => r.roleName), 
+    [configuredUserRoles]
+  );
+  
+  // Merge configured roles with any existing user roles not present in configuration
   const userRoles = useMemo(() => {
-    const existingRoles = Array.from(new Set(allUsers.map(u => u.role)));
+    const existingRoles = Array.from(new Set(allUsers.map(u => u.role).filter(Boolean)));
     const merged = Array.from(new Set([...configuredRoleNames, ...existingRoles]));
     return merged.sort();
   }, [configuredRoleNames, allUsers]);
 
   // Filter users based on selected filters
   const filteredUsers = useMemo(() => {
-    const filtered = allUsers.filter((user) => {
+    const filtered = combinedUsers.filter((user) => {
       const roleMatch = !filterRole || user.role === filterRole;
       const vendorMatch = !filterVendor || user.vendorName === filterVendor;
       const statusMatch = !filterStatus || user.status === filterStatus;
@@ -113,6 +184,36 @@ const UsersView = () => {
       return aScore - bScore;
     });
   }, [allUsers, filterRole, filterVendor, filterStatus, filterMobileVerified, filterFaceRegistered]);
+
+  // Helper function to calculate time remaining for emergency users
+  const getTimeRemaining = useCallback((expiresAt) => {
+    const now = new Date();
+    const expiry = new Date(expiresAt);
+    const diffMs = expiry - now;
+    
+    if (diffMs <= 0) return { text: 'Expired', color: '#dc2626', urgent: true };
+    
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    let color = '#22c55e'; // green
+    let urgent = false;
+    
+    if (hours < 2) {
+      color = '#dc2626'; // red
+      urgent = true;
+    } else if (hours < 6) {
+      color = '#f59e0b'; // orange
+    } else if (hours < 12) {
+      color = '#eab308'; // yellow
+    }
+    
+    if (hours >= 1) {
+      return { text: `${hours}h ${minutes}m left`, color, urgent };
+    } else {
+      return { text: `${minutes}m left`, color, urgent };
+    }
+  }, []);
 
   // Get users who need verification (mobile not verified OR face not registered)
   const usersNeedingVerification = useMemo(() => {
@@ -420,6 +521,17 @@ const UsersView = () => {
 
   return (
     <div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.6;
+          }
+        }
+      `}</style>
+      
       <div className="page-header">
         <h1 className="page-title">Users Management</h1>
         <p className="page-subtitle">Manage users under your organization</p>
@@ -591,7 +703,42 @@ const UsersView = () => {
                     </span>
                   </td>
                   <td>
-                    <strong>{user.fullName}</strong>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <strong>{user.fullName}</strong>
+                      {user.isEmergency && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #fbbf24',
+                              display: 'inline-block'
+                            }}
+                          >
+                            Emergency Onboarded
+                          </span>
+                          <span
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              background: getTimeRemaining(user.emergencyExpiresAt).color + '20',
+                              color: getTimeRemaining(user.emergencyExpiresAt).color,
+                              border: `1px solid ${getTimeRemaining(user.emergencyExpiresAt).color}`,
+                              display: 'inline-block',
+                              animation: getTimeRemaining(user.emergencyExpiresAt).urgent ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none'
+                            }}
+                          >
+                            ⏰ {getTimeRemaining(user.emergencyExpiresAt).text}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <span
@@ -662,42 +809,74 @@ const UsersView = () => {
                     </span>
                   </td>
                   <td>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => handleEditUser(user)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: 'var(--color-primary)',
-                          padding: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                        title="Edit User"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      {(!user.mobileVerified || !user.faceRegistered) && (
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {!user.isEmergency && (
+                        <>
+                          <button
+                            onClick={() => handleEditUser(user)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: 'var(--color-primary)',
+                              padding: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            title="Edit User"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          {(!user.mobileVerified || !user.faceRegistered) && (
+                            <button
+                              onClick={() => {
+                                setSelectedUserForVerification(user);
+                                setShowVerificationModal(true);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#10b981',
+                                padding: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                              title="Send Verification Link"
+                            >
+                              <Send size={16} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {user.isEmergency && (
                         <button
                           onClick={() => {
                             setSelectedUserForVerification(user);
                             setShowVerificationModal(true);
                           }}
                           style={{
-                            background: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            background: '#6366f1',
+                            color: 'white',
                             border: 'none',
                             cursor: 'pointer',
-                            color: '#10b981',
-                            padding: '4px',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center',
+                            gap: '6px',
+                            whiteSpace: 'nowrap'
                           }}
-                          title="Send Verification Link"
+                          onMouseEnter={(e) => e.target.style.background = '#4f46e5'}
+                          onMouseLeave={(e) => e.target.style.background = '#6366f1'}
+                          title="Convert emergency user to permanent account"
                         >
-                          <Send size={16} />
+                          <Send size={14} />
+                          Convert to Permanent
                         </button>
                       )}
                     </div>
@@ -1940,8 +2119,8 @@ const UsersView = () => {
               }}
             >
               <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Send size={20} style={{ color: '#10b981' }} />
-                Send Verification Link
+                <Send size={20} style={{ color: selectedUserForVerification.isEmergency ? '#6366f1' : '#10b981' }} />
+                {selectedUserForVerification.isEmergency ? 'Convert to Permanent Account' : 'Send Verification Link'}
               </h2>
               <button
                 onClick={() => {
@@ -1962,6 +2141,34 @@ const UsersView = () => {
 
             {/* Modal Body */}
             <div style={{ padding: '24px' }}>
+              {selectedUserForVerification.isEmergency && (
+                <div
+                  style={{
+                    padding: '16px',
+                    background: '#fef3c7',
+                    border: '1px solid #fbbf24',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                  }}
+                >
+                  <AlertCircle size={20} style={{ color: '#92400e', marginTop: '2px', flexShrink: 0 }} />
+                  <div>
+                    <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600, color: '#92400e' }}>
+                      Emergency Onboarded User
+                    </p>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#78350f' }}>
+                      This user was onboarded using emergency access. Time remaining: <strong>{getTimeRemaining(selectedUserForVerification.emergencyExpiresAt).text}</strong>
+                    </p>
+                    <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#78350f', fontWeight: 600 }}>
+                      Converting to permanent will send mobile and face verification links.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               <div
                 style={{
                   padding: '16px',
@@ -1977,10 +2184,10 @@ const UsersView = () => {
                 <Check size={20} style={{ color: '#059669', marginTop: '2px', flexShrink: 0 }} />
                 <div>
                   <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600, color: '#059669' }}>
-                    Verification Link Sent Successfully!
+                    {selectedUserForVerification.isEmergency ? 'Conversion Link Will Be Sent!' : 'Verification Link Sent Successfully!'}
                   </p>
                   <p style={{ margin: 0, fontSize: '13px', color: '#047857' }}>
-                    A verification link has been sent to <strong>{selectedUserForVerification.fullName}</strong>'s mobile number <strong>+91-{selectedUserForVerification.mobile}</strong> via SMS and WhatsApp.
+                    A verification link {selectedUserForVerification.isEmergency ? 'will be' : 'has been'} sent to <strong>{selectedUserForVerification.fullName}</strong>'s mobile number <strong>+91-{selectedUserForVerification.mobile}</strong> via SMS and WhatsApp.
                   </p>
                 </div>
               </div>

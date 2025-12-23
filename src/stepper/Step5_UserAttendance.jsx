@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useConfig } from '../contexts/ConfigContext';
 import { exportSessionAttendance } from '../utils/excelExport';
 
 // Small self-contained Step5: User Attendance & Device Issuance
@@ -37,6 +38,7 @@ const USER_ROLES = [
 
 const Step5_UserAttendance = ({ formData, setFormData }) => {
   const { user } = useAuth();
+  const { emergencyOnboardingConfig, checklistConfig } = useConfig();
 
   // Users source: prefer `formData.userMappings` (users mapped to venues in Step 3).
   // If none present, fall back to `formData.users` or a small sample fallback for UI.
@@ -135,9 +137,11 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
   }, [formData.selectedDates, formData.sessionTemplates, formData.dateSessionMap, formData.sessions, formData.projectSessions, formData.project]);
 
   // Sessions that are allowed to be used for marking attendance in the modal.
-  // Show all sessions but mark which are within time window (sessionStart - 4 hours to sessionEnd)
+  // Show all sessions but mark which are within time window (sessionStart - Z hours to sessionEnd)
+  // Z hours is configured in Emergency Onboarding settings
   const sessionsWithAvailability = useMemo(() => {
     const now = Date.now();
+    const captureWindowHours = emergencyOnboardingConfig?.attendanceCaptureBeforeSessionHours || 2;
     return (sessions || []).map(s => {
       const startISO = s.startISO || (s.raw && (s.raw.startISO || s.raw.start)) || null;
       const endISO = s.endISO || (s.raw && (s.raw.endISO || s.raw.end)) || null;
@@ -145,12 +149,12 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
       const endTime = endISO ? new Date(endISO).getTime() : null;
       let isAvailable = false;
       if (startTime && endTime) {
-        const windowStart = startTime - (4 * 60 * 60 * 1000);
+        const windowStart = startTime - (captureWindowHours * 60 * 60 * 1000);
         isAvailable = now >= windowStart && now <= endTime;
       }
       return { ...s, isAvailable };
     });
-  }, [sessions]);
+  }, [sessions, emergencyOnboardingConfig]);
 
   // Session filter: 'live' (today's sessions in IST) or 'all'
   const [sessionFilter, setSessionFilter] = useState('live');
@@ -900,19 +904,39 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   {(() => {
-                    // Calculate T-60 and T-30 for this session
-                    let t60Time = '—', t30Time = '—';
+                    // Get configured checklist times from config
+                    const checklist1Config = checklistConfig?.checklist1 || { enableBeforeSessionHours: 1, disableAfterSessionHours: 2 };
+                    const checklist2Config = checklistConfig?.checklist2 || { enableBeforeSessionHours: 0.5, disableAfterSessionHours: 1 };
+                    
+                    // Calculate configured times for this session
+                    let checklist1EnableTime = '—', checklist1DisableTime = '—';
+                    let checklist2EnableTime = '—', checklist2DisableTime = '—';
+                    let checklist1Available = false, checklist2Available = false;
+                    
                     try {
                       let startDt = null;
+                      let endDt = null;
                       try {
                         startDt = s.startISO ? new Date(s.startISO) : (s.raw && (s.raw.startISO || s.raw.start)) ? new Date(s.raw.startISO || s.raw.start) : null;
-                      } catch (e) { startDt = null; }
-                      if (startDt && !isNaN(startDt.getTime())) {
-                        const t60Dt = new Date(startDt.getTime() - 60 * 60 * 1000);
-                        const t30Dt = new Date(startDt.getTime() - 30 * 60 * 1000);
-                        // Format times as HH:MM (24-hour)
-                        t60Time = `${String(t60Dt.getHours()).padStart(2, '0')}:${String(t60Dt.getMinutes()).padStart(2, '0')}`;
-                        t30Time = `${String(t30Dt.getHours()).padStart(2, '0')}:${String(t30Dt.getMinutes()).padStart(2, '0')}`;
+                        endDt = s.endISO ? new Date(s.endISO) : (s.raw && (s.raw.endISO || s.raw.end)) ? new Date(s.raw.endISO || s.raw.end) : null;
+                      } catch (e) { startDt = null; endDt = null; }
+                      
+                      if (startDt && !isNaN(startDt.getTime()) && endDt && !isNaN(endDt.getTime())) {
+                        const now = Date.now();
+                        
+                        // Checklist 1 times
+                        const c1EnableDt = new Date(startDt.getTime() - checklist1Config.enableBeforeSessionHours * 60 * 60 * 1000);
+                        const c1DisableDt = new Date(endDt.getTime() + checklist1Config.disableAfterSessionHours * 60 * 60 * 1000);
+                        checklist1EnableTime = `${String(c1EnableDt.getHours()).padStart(2, '0')}:${String(c1EnableDt.getMinutes()).padStart(2, '0')}`;
+                        checklist1DisableTime = `${String(c1DisableDt.getHours()).padStart(2, '0')}:${String(c1DisableDt.getMinutes()).padStart(2, '0')}`;
+                        checklist1Available = now >= c1EnableDt.getTime() && now <= c1DisableDt.getTime();
+                        
+                        // Checklist 2 times
+                        const c2EnableDt = new Date(startDt.getTime() - checklist2Config.enableBeforeSessionHours * 60 * 60 * 1000);
+                        const c2DisableDt = new Date(endDt.getTime() + checklist2Config.disableAfterSessionHours * 60 * 60 * 1000);
+                        checklist2EnableTime = `${String(c2EnableDt.getHours()).padStart(2, '0')}:${String(c2EnableDt.getMinutes()).padStart(2, '0')}`;
+                        checklist2DisableTime = `${String(c2DisableDt.getHours()).padStart(2, '0')}:${String(c2DisableDt.getMinutes()).padStart(2, '0')}`;
+                        checklist2Available = now >= c2EnableDt.getTime() && now <= c2DisableDt.getTime();
                       }
                     } catch (e) { /* ignore */ }
                     
@@ -940,10 +964,22 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                           </button>
                         ) : (
                           <button 
-                            onClick={(e) => { e.stopPropagation(); setActiveChecklistTab('checklist1'); openChecklistModal(s); }} 
-                            style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                            onClick={(e) => { e.stopPropagation(); if (checklist1Available) { setActiveChecklistTab('checklist1'); openChecklistModal(s); } }} 
+                            disabled={!checklist1Available}
+                            title={checklist1Available ? `Submit Checklist-1 (Available: ${checklist1EnableTime} - ${checklist1DisableTime})` : `Checklist-1 not available. Available from ${checklist1EnableTime} to ${checklist1DisableTime}`}
+                            style={{ 
+                              padding: '6px 10px', 
+                              borderRadius: 8, 
+                              background: checklist1Available ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : '#d1d5db', 
+                              color: 'white', 
+                              border: 'none', 
+                              cursor: checklist1Available ? 'pointer' : 'not-allowed', 
+                              fontWeight: 600, 
+                              fontSize: 12,
+                              opacity: checklist1Available ? 1 : 0.6
+                            }}
                           >
-                            Submit Checklist-1 (T-60: {t60Time})
+                            Submit Checklist-1 ({checklist1EnableTime} - {checklist1DisableTime})
                           </button>
                         )}
 
@@ -957,10 +993,22 @@ const Step5_UserAttendance = ({ formData, setFormData }) => {
                           </button>
                         ) : (
                           <button 
-                            onClick={(e) => { e.stopPropagation(); setActiveChecklistTab('checklist2'); openChecklistModal(s); }} 
-                            style={{ padding: '6px 10px', borderRadius: 8, background: 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                            onClick={(e) => { e.stopPropagation(); if (checklist2Available) { setActiveChecklistTab('checklist2'); openChecklistModal(s); } }} 
+                            disabled={!checklist2Available}
+                            title={checklist2Available ? `Submit Checklist-2 (Available: ${checklist2EnableTime} - ${checklist2DisableTime})` : `Checklist-2 not available. Available from ${checklist2EnableTime} to ${checklist2DisableTime}`}
+                            style={{ 
+                              padding: '6px 10px', 
+                              borderRadius: 8, 
+                              background: checklist2Available ? 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)' : '#d1d5db', 
+                              color: 'white', 
+                              border: 'none', 
+                              cursor: checklist2Available ? 'pointer' : 'not-allowed', 
+                              fontWeight: 600, 
+                              fontSize: 12,
+                              opacity: checklist2Available ? 1 : 0.6
+                            }}
                           >
-                            Submit Checklist-2 (T-30: {t30Time})
+                            Submit Checklist-2 ({checklist2EnableTime} - {checklist2DisableTime})
                           </button>
                         )}
                       </>
